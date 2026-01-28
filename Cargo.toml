@@ -1,0 +1,93 @@
+[package]
+name = "ruzu"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.75"
+description = "Rust Graph Database - Phase 0 Proof of Concept"
+license = "Apache-2.0"
+repository = "https://github.com/your-org/ruzu"
+
+[dependencies]
+pest = "2.7"
+pest_derive = "2.7"
+thiserror = "1.0"
+
+# Phase 1: Persistent Storage
+memmap2 = "0.9"              # Memory-mapped I/O
+parking_lot = "0.12"         # Faster Mutex/RwLock
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"              # Binary serialization
+csv = "1.3"                  # CSV parsing
+crc32fast = "1.4"            # CRC32 checksums
+uuid = { version = "1.6", features = ["v4", "serde"] }
+rayon = "1.8"                # Parallel iteration for CSV import
+
+# Phase 2: Query Engine with DataFusion
+datafusion = "44"            # Query execution engine (compatible version)
+arrow = "53.3"               # Columnar data format (pin to avoid chrono conflict)
+async-trait = "0.1"          # Async trait support
+tokio = { version = "1", features = ["rt-multi-thread"] }
+futures = "0.3"              # Async utilities
+chrono = "0.4.38"            # Pin chrono version to avoid quarter() conflict
+
+# Optional: Memory profiling
+dhat = { version = "0.3", optional = true }
+tempfile = { version = "3.10", optional = true }
+
+[features]
+default = []
+dhat-heap = ["dhat", "tempfile"]
+
+[dev-dependencies]
+criterion = "0.5"
+clap = { version = "4.5", features = ["derive"] }
+fake = "2.9"
+rand = "0.8"
+
+# Phase 1: Testing
+proptest = "1.4"             # Property-based testing
+tempfile = "3.10"            # Temporary directories for tests
+
+# Phase 2: Async testing
+tokio-test = "0.4"           # Async test utilities
+
+[[bench]]
+name = "e2e_benchmark"
+harness = false
+
+[[bench]]
+name = "parse_benchmark"
+harness = false
+
+[[bench]]
+name = "storage_benchmark"
+harness = false
+
+[[bench]]
+name = "csv_benchmark"
+harness = false
+
+[[bench]]
+name = "buffer_benchmark"
+harness = false
+
+[[bench]]
+name = "memory_benchmark"
+harness = false
+
+[[bench]]
+name = "query_benchmark"
+harness = false
+
+[[bin]]
+name = "memory_profile"
+path = "src/bin/memory_profile.rs"
+required-features = ["dhat-heap"]
+
+[lints.rust]
+# Allow unsafe code for mmap operations in buffer_pool module
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"

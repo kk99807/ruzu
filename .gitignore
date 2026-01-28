@@ -1,0 +1,27 @@
+# Rust
+target/
+debug/
+release/
+*.rs.bk
+*.rlib
+*.prof*
+Cargo.lock
+
+# IDE
+.claude/settings.local.json
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# Profiling output
+dhat-heap.json
