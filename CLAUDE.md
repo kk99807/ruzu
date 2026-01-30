@@ -11,6 +11,7 @@ Auto-generated from all feature plans. Last updated: 2025-12-05
 - Custom page-based format with 4KB pages, WAL, buffer pool (Phase 1 complete) (005-query-engine)
 - Rust 1.75+ (stable, 2021 edition) + serde + bincode (serialization, already in use), parking_lot (synchronization, already in use) (001-fix-rel-persistence)
 - Custom page-based file format with 4KB pages, WAL, buffer pool (already implemented) (001-fix-rel-persistence)
+- Rust 1.75+ (stable, 2021 edition) + pest (parser), serde + bincode (serialization), parking_lot (locks), csv (parsing), memmap2 (mmap) (006-add-datatypes)
 
 - Rust 1.75+ (stable, 2021 edition) + pest (parser), criterion (benchmarks), Apache Arrow (deferred for PoC) (001-poc-basic-functionality)
 
@@ -30,9 +31,9 @@ cargo test; cargo clippy
 Rust 1.75+ (stable, 2021 edition): Follow standard conventions
 
 ## Recent Changes
+- 006-add-datatypes: Added Rust 1.75+ (stable, 2021 edition) + pest (parser), serde + bincode (serialization), parking_lot (locks), csv (parsing), memmap2 (mmap)
 - 001-fix-rel-persistence: Added Rust 1.75+ (stable, 2021 edition) + serde + bincode (serialization, already in use), parking_lot (synchronization, already in use)
 - 005-query-engine: Added Rust 1.75+ (stable, 2021 edition)
-- 004-optimize-csv-memory: Added Rust 1.75+ (stable, 2021 edition) + csv (parsing), memmap2 (mmap), crossbeam (parallel processing), parking_lot (synchronization), rayon (parallel iteration)
 
 
 <!-- MANUAL ADDITIONS START -->

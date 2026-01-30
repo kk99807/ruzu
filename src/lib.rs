@@ -884,6 +884,8 @@ impl Database {
                 let data_type = match type_str.to_uppercase().as_str() {
                     "INT64" => DataType::Int64,
                     "STRING" => DataType::String,
+                    "FLOAT64" => DataType::Float64,
+                    "BOOL" => DataType::Bool,
                     _ => {
                         return Err(RuzuError::SchemaError(format!(
                             "Unknown data type: {type_str}"
@@ -928,12 +930,23 @@ impl Database {
             .get_mut(label)
             .ok_or_else(|| RuzuError::SchemaError(format!("Table '{label}' does not exist")))?;
 
-        // Convert properties to a row
+        // Convert properties to a row, with type promotion for FLOAT64 columns
         let mut row: HashMap<String, Value> = HashMap::new();
         for (name, literal) in &properties {
-            let value = match literal {
-                Literal::Int64(n) => Value::Int64(*n),
-                Literal::String(s) => Value::String(s.clone()),
+            let value = literal_to_value(literal);
+            // Promote Int64 to Float64 if the column type is FLOAT64
+            let value = if let Value::Int64(n) = &value {
+                if let Some(col) = schema.columns.iter().find(|c| c.name == *name) {
+                    if col.data_type == DataType::Float64 {
+                        Value::Float64(*n as f64)
+                    } else {
+                        value
+                    }
+                } else {
+                    value
+                }
+            } else {
+                value
             };
             row.insert(name.clone(), value);
         }
@@ -1134,16 +1147,20 @@ impl Database {
                                     RuzuError::ExecutionError("MIN requires an argument".into())
                                 })?;
                                 let prop_name = format!("{v}.{p}");
-                                let min = rows.iter()
+                                let values: Vec<&Value> = rows.iter()
                                     .filter_map(|r| r.get(&prop_name))
-                                    .filter_map(|v| match v {
-                                        Value::Int64(n) => Some(*n),
-                                        _ => None,
-                                    })
-                                    .min();
-                                match min {
-                                    Some(n) => Value::Int64(n),
-                                    None => Value::Null,
+                                    .filter(|v| !v.is_null())
+                                    .collect();
+                                if values.is_empty() {
+                                    Value::Null
+                                } else {
+                                    let mut min_val = values[0].clone();
+                                    for v in &values[1..] {
+                                        if let Some(std::cmp::Ordering::Less) = (*v).compare(&min_val) {
+                                            min_val = (*v).clone();
+                                        }
+                                    }
+                                    min_val
                                 }
                             }
                             AstAggregateFunction::Max => {
@@ -1151,16 +1168,20 @@ impl Database {
                                     RuzuError::ExecutionError("MAX requires an argument".into())
                                 })?;
                                 let prop_name = format!("{v}.{p}");
-                                let max = rows.iter()
+                                let values: Vec<&Value> = rows.iter()
                                     .filter_map(|r| r.get(&prop_name))
-                                    .filter_map(|v| match v {
-                                        Value::Int64(n) => Some(*n),
-                                        _ => None,
-                                    })
-                                    .max();
-                                match max {
-                                    Some(n) => Value::Int64(n),
-                                    None => Value::Null,
+                                    .filter(|v| !v.is_null())
+                                    .collect();
+                                if values.is_empty() {
+                                    Value::Null
+                                } else {
+                                    let mut max_val = values[0].clone();
+                                    for v in &values[1..] {
+                                        if let Some(std::cmp::Ordering::Greater) = (*v).compare(&max_val) {
+                                            max_val = (*v).clone();
+                                        }
+                                    }
+                                    max_val
                                 }
                             }
                         };
@@ -1259,6 +1280,8 @@ impl Database {
                 let data_type = match type_str.to_uppercase().as_str() {
                     "INT64" => DataType::Int64,
                     "STRING" => DataType::String,
+                    "FLOAT64" => DataType::Float64,
+                    "BOOL" => DataType::Bool,
                     _ => {
                         return Err(RuzuError::SchemaError(format!(
                             "Unknown data type: {type_str}"
@@ -1312,10 +1335,7 @@ impl Database {
         })?;
 
         let src_node_offset = if let Some((key, value)) = &src_node.property_filter {
-            let val = match value {
-                Literal::Int64(n) => Value::Int64(*n),
-                Literal::String(s) => Value::String(s.clone()),
-            };
+            let val = literal_to_value(value);
             src_table.find_by_pk(key, &val)
         } else {
             None
@@ -1327,10 +1347,7 @@ impl Database {
         })?;
 
         let dst_node_offset = if let Some((key, value)) = &dst_node.property_filter {
-            let val = match value {
-                Literal::Int64(n) => Value::Int64(*n),
-                Literal::String(s) => Value::String(s.clone()),
-            };
+            let val = literal_to_value(value);
             dst_table.find_by_pk(key, &val)
         } else {
             None
@@ -1345,10 +1362,7 @@ impl Database {
         // Convert relationship properties
         let props: Vec<Value> = rel_props
             .into_iter()
-            .map(|(_, literal)| match literal {
-                Literal::Int64(n) => Value::Int64(n),
-                Literal::String(s) => Value::String(s),
-            })
+            .map(|(_, literal)| literal_into_value(literal))
             .collect();
 
         // Get mutable reference to relationship table
@@ -1448,10 +1462,7 @@ impl Database {
 
         // Check if we have a filter on source node
         let src_offsets: Vec<usize> = if let Some((key, value)) = &src_node.property_filter {
-            let val = match value {
-                Literal::Int64(n) => Value::Int64(*n),
-                Literal::String(s) => Value::String(s.clone()),
-            };
+            let val = literal_to_value(value);
             if let Some(offset) = src_table.find_by_pk(key, &val) {
                 vec![offset]
             } else {
@@ -1464,10 +1475,7 @@ impl Database {
 
         // Check if we have a filter on destination node
         let dst_filter = dst_node.property_filter.as_ref().map(|(key, value)| {
-            let val = match value {
-                Literal::Int64(n) => Value::Int64(*n),
-                Literal::String(s) => Value::String(s.clone()),
-            };
+            let val = literal_to_value(value);
             (key.clone(), val)
         });
 
@@ -1585,10 +1593,9 @@ impl Database {
 
                     let matches = match filter_val {
                         Some(val) => {
-                            let literal_val = match &expr.value {
-                                Literal::Int64(n) => Value::Int64(*n),
-                                Literal::String(s) => Value::String(s.clone()),
-                            };
+                            let literal_val = literal_to_value(&expr.value);
+                            // Promote for cross-type comparison (Int64 vs Float64)
+                            let (val, literal_val) = promote_for_comparison(val, literal_val);
                             let cmp_result = val.compare(&literal_val);
                             match cmp_result {
                                 None => false,
@@ -2009,6 +2016,36 @@ impl Database {
         }
 
         Ok(final_result)
+    }
+}
+
+/// Promotes values for cross-type comparison (Int64 vs Float64).
+/// Returns the pair with appropriate type promotion applied.
+fn promote_for_comparison(a: Value, b: Value) -> (Value, Value) {
+    match (&a, &b) {
+        (Value::Int64(n), Value::Float64(_)) => (Value::Float64(*n as f64), b),
+        (Value::Float64(_), Value::Int64(n)) => (a, Value::Float64(*n as f64)),
+        _ => (a, b),
+    }
+}
+
+/// Converts a Literal to a Value.
+fn literal_to_value(literal: &Literal) -> Value {
+    match literal {
+        Literal::Int64(n) => Value::Int64(*n),
+        Literal::String(s) => Value::String(s.clone()),
+        Literal::Float64(f) => Value::Float64(*f),
+        Literal::Bool(b) => Value::Bool(*b),
+    }
+}
+
+/// Converts a Literal to a Value (owned version).
+fn literal_into_value(literal: Literal) -> Value {
+    match literal {
+        Literal::Int64(n) => Value::Int64(n),
+        Literal::String(s) => Value::String(s),
+        Literal::Float64(f) => Value::Float64(f),
+        Literal::Bool(b) => Value::Bool(b),
     }
 }
 

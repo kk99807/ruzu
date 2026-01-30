@@ -106,12 +106,12 @@ impl NodeLoader {
                 ImportError::column_error(row_num, col_name, format!("Invalid FLOAT64: {e}"))
             }),
             DataType::Bool => match field.to_lowercase().as_str() {
-                "true" | "1" | "yes" | "t" => Ok(Value::Bool(true)),
-                "false" | "0" | "no" | "f" => Ok(Value::Bool(false)),
+                "true" => Ok(Value::Bool(true)),
+                "false" => Ok(Value::Bool(false)),
                 _ => Err(ImportError::column_error(
                     row_num,
                     col_name,
-                    format!("Invalid BOOL: {field}"),
+                    format!("Invalid BOOL: {field} (expected 'true' or 'false')"),
                 )),
             },
             DataType::String => {
@@ -500,12 +500,12 @@ fn parse_field_with_interner(
             ImportError::column_error(row_num, col_name, format!("Invalid FLOAT64: {e}"))
         }),
         DataType::Bool => match field.to_lowercase().as_str() {
-            "true" | "1" | "yes" | "t" => Ok(Value::Bool(true)),
-            "false" | "0" | "no" | "f" => Ok(Value::Bool(false)),
+            "true" => Ok(Value::Bool(true)),
+            "false" => Ok(Value::Bool(false)),
             _ => Err(ImportError::column_error(
                 row_num,
                 col_name,
-                format!("Invalid BOOL: {field}"),
+                format!("Invalid BOOL: {field} (expected 'true' or 'false')"),
             )),
         },
         DataType::String => {
@@ -633,9 +633,9 @@ mod tests {
         );
         let loader = NodeLoader::new(schema, CsvImportConfig::default());
 
-        // Test various bool representations
-        let true_values = ["true", "True", "TRUE", "1", "yes", "t"];
-        let false_values = ["false", "False", "FALSE", "0", "no", "f"];
+        // Test case-insensitive true/false (only accepted values per R4)
+        let true_values = ["true", "True", "TRUE"];
+        let false_values = ["false", "False", "FALSE"];
 
         for val in true_values {
             let result = loader.parse_field(val, &DataType::Bool, 1, "test");
@@ -645,6 +645,13 @@ mod tests {
         for val in false_values {
             let result = loader.parse_field(val, &DataType::Bool, 1, "test");
             assert_eq!(result.unwrap(), Value::Bool(false));
+        }
+
+        // Verify rejected values
+        let rejected_values = ["1", "0", "yes", "no", "t", "f"];
+        for val in rejected_values {
+            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            assert!(result.is_err(), "Expected '{}' to be rejected", val);
         }
     }
 

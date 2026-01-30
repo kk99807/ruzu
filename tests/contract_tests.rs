@@ -1618,3 +1618,400 @@ mod memory_contract_tests {
         assert_eq!(restored_v1.checksum, 12345);
     }
 }
+
+// =============================================================================
+// Type System Extension Contract Tests (Feature 006-add-datatypes)
+// =============================================================================
+
+mod type_system_contracts {
+    use ruzu::{Database, DatabaseConfig, Value};
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    // C-DDL-01: FLOAT64 column in CREATE NODE TABLE
+    #[test]
+    fn test_c_ddl_01_float64_in_create_node_table() {
+        let mut db = Database::new();
+        let result = db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))");
+        assert!(result.is_ok(), "CREATE NODE TABLE with FLOAT64 should succeed");
+    }
+
+    // C-DDL-02: BOOL column in CREATE NODE TABLE
+    #[test]
+    fn test_c_ddl_02_bool_in_create_node_table() {
+        let mut db = Database::new();
+        let result = db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))");
+        assert!(result.is_ok(), "CREATE NODE TABLE with BOOL should succeed");
+    }
+
+    // C-DDL-03: All four types in single table
+    #[test]
+    fn test_c_ddl_03_all_four_types_in_single_table() {
+        let mut db = Database::new();
+        let result = db.execute("CREATE NODE TABLE Mixed(id INT64, name STRING, score FLOAT64, active BOOL, PRIMARY KEY(id))");
+        assert!(result.is_ok(), "All four types in single table should succeed");
+    }
+
+    // C-DDL-04: FLOAT64/BOOL in CREATE REL TABLE
+    #[test]
+    fn test_c_ddl_04_float64_bool_in_create_rel_table() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE User(name STRING, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE NODE TABLE Product(name STRING, PRIMARY KEY(name))").unwrap();
+        let result = db.execute("CREATE REL TABLE Rates(FROM User TO Product, score FLOAT64, verified BOOL)");
+        assert!(result.is_ok(), "CREATE REL TABLE with FLOAT64 and BOOL should succeed");
+    }
+
+    // C-LIT-01: Float literal parsing
+    #[test]
+    fn test_c_lit_01_float_literal_parsing() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 3.14})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 42.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'C', price: 0.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'D', price: -0.5})").unwrap();
+        db.execute("CREATE (:Product {name: 'E', price: .5})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price").unwrap();
+        assert_eq!(result.row_count(), 5);
+    }
+
+    // C-LIT-02: Bool literal parsing
+    #[test]
+    fn test_c_lit_02_bool_literal_parsing() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+        db.execute("CREATE (:Feature {name: 'C', enabled: TRUE})").unwrap();
+        db.execute("CREATE (:Feature {name: 'D', enabled: FALSE})").unwrap();
+        db.execute("CREATE (:Feature {name: 'E', enabled: True})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) RETURN f.name, f.enabled").unwrap();
+        assert_eq!(result.row_count(), 5);
+    }
+
+    // C-DML-01: Create node with FLOAT64 property
+    #[test]
+    fn test_c_dml_01_create_node_with_float64() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'Widget', price: 19.99})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("p.price"), Some(&Value::Float64(19.99)));
+    }
+
+    // C-DML-02: Create node with BOOL property
+    #[test]
+    fn test_c_dml_02_create_node_with_bool() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'DarkMode', enabled: true})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) RETURN f.name, f.enabled").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("f.enabled"), Some(&Value::Bool(true)));
+    }
+
+    // C-DML-03: Integer value promoted to FLOAT64
+    #[test]
+    fn test_c_dml_03_integer_value_for_float64_column() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'Free', price: 0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("p.price"), Some(&Value::Float64(0.0)));
+    }
+
+    // C-QRY-01: Float comparison operators
+    #[test]
+    fn test_c_qry_01_float_comparison_operators() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'Cheap', price: 5.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'Mid', price: 15.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'Expensive', price: 50.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) WHERE p.price > 10.0 RETURN p.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    // C-QRY-02: Float comparison with integer literal
+    #[test]
+    fn test_c_qry_02_float_comparison_with_integer_literal() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'Cheap', price: 5.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'Expensive', price: 50.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) WHERE p.price > 10 RETURN p.name").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("p.name"), Some(&Value::String("Expensive".to_string())));
+    }
+
+    // C-QRY-03: Bool equality
+    #[test]
+    fn test_c_qry_03_bool_equality() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+        db.execute("CREATE (:Feature {name: 'C', enabled: true})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) WHERE f.enabled = true RETURN f.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    // C-QRY-04: Bool inequality
+    #[test]
+    fn test_c_qry_04_bool_inequality() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+        db.execute("CREATE (:Feature {name: 'C', enabled: true})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) WHERE f.enabled <> false RETURN f.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    // C-QRY-05: ORDER BY on FLOAT64
+    #[test]
+    fn test_c_qry_05_order_by_float64() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'C', price: 50.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 5.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 15.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price ORDER BY p.price ASC").unwrap();
+        assert_eq!(result.row_count(), 3);
+        assert_eq!(result.get_row(0).unwrap().get("p.price"), Some(&Value::Float64(5.0)));
+        assert_eq!(result.get_row(1).unwrap().get("p.price"), Some(&Value::Float64(15.0)));
+        assert_eq!(result.get_row(2).unwrap().get("p.price"), Some(&Value::Float64(50.0)));
+    }
+
+    // C-CSV-01: FLOAT64 values from CSV
+    #[test]
+    fn test_c_csv_01_float64_from_csv() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("products.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,price").unwrap();
+        writeln!(f, "Widget,19.99").unwrap();
+        writeln!(f, "Gadget,5.50").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Product FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    // C-CSV-02: BOOL values from CSV
+    #[test]
+    fn test_c_csv_02_bool_from_csv() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("features.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,enabled").unwrap();
+        writeln!(f, "DarkMode,true").unwrap();
+        writeln!(f, "LightMode,false").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Feature FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (f:Feature) RETURN f.name, f.enabled").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    // C-CSV-03: Case-insensitive BOOL in CSV
+    #[test]
+    fn test_c_csv_03_case_insensitive_bool_in_csv() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("features.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,enabled").unwrap();
+        writeln!(f, "A,TRUE").unwrap();
+        writeln!(f, "B,False").unwrap();
+        writeln!(f, "C,true").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Feature FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (f:Feature) RETURN f.name, f.enabled").unwrap();
+        assert_eq!(result.row_count(), 3);
+    }
+
+    // C-CSV-04: Invalid BOOL in CSV rejected
+    #[test]
+    fn test_c_csv_04_invalid_bool_in_csv_rejected() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("features.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,enabled").unwrap();
+        writeln!(f, "A,yes").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        let result = db.execute(&format!("COPY Feature FROM '{}'", csv_str));
+        assert!(result.is_err(), "Invalid BOOL 'yes' should be rejected");
+    }
+
+    // C-CSV-05: Invalid FLOAT64 in CSV rejected
+    #[test]
+    fn test_c_csv_05_invalid_float64_in_csv_rejected() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("products.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,price").unwrap();
+        writeln!(f, "A,abc").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        let result = db.execute(&format!("COPY Product FROM '{}'", csv_str));
+        assert!(result.is_err(), "Invalid FLOAT64 'abc' should be rejected");
+    }
+
+    // C-PER-01: FLOAT64 data survives restart
+    #[test]
+    fn test_c_per_01_float64_survives_restart() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+            db.execute("CREATE (:Product {name: 'Widget', price: 19.99})").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (p:Product) RETURN p.name, p.price").unwrap();
+            assert_eq!(result.row_count(), 1);
+            assert_eq!(result.get_row(0).unwrap().get("p.price"), Some(&Value::Float64(19.99)));
+        }
+    }
+
+    // C-PER-02: BOOL data survives restart
+    #[test]
+    fn test_c_per_02_bool_survives_restart() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+            db.execute("CREATE (:Feature {name: 'DarkMode', enabled: true})").unwrap();
+            db.execute("CREATE (:Feature {name: 'Beta', enabled: false})").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (f:Feature) RETURN f.name, f.enabled").unwrap();
+            assert_eq!(result.row_count(), 2);
+        }
+    }
+
+    // C-AGG-01: COUNT on FLOAT64 column
+    #[test]
+    fn test_c_agg_01_count_on_float64() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 10.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 20.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'C', price: 30.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN COUNT(p.price)").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("COUNT(p.price)"), Some(&Value::Int64(3)));
+    }
+
+    // C-AGG-02: MIN/MAX on FLOAT64
+    #[test]
+    fn test_c_agg_02_min_max_on_float64() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 10.5})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 5.25})").unwrap();
+        db.execute("CREATE (:Product {name: 'C', price: 30.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN MIN(p.price)").unwrap();
+        assert_eq!(result.get_row(0).unwrap().get("MIN(p.price)"), Some(&Value::Float64(5.25)));
+
+        let result = db.execute("MATCH (p:Product) RETURN MAX(p.price)").unwrap();
+        assert_eq!(result.get_row(0).unwrap().get("MAX(p.price)"), Some(&Value::Float64(30.0)));
+    }
+
+    // C-AGG-03: COUNT on BOOL column
+    #[test]
+    fn test_c_agg_03_count_on_bool() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) RETURN COUNT(f.enabled)").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("COUNT(f.enabled)"), Some(&Value::Int64(2)));
+    }
+
+    // C-REL-01: Relationship with FLOAT64/BOOL properties
+    #[test]
+    fn test_c_rel_01_relationship_with_float64_bool_properties() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE NODE TABLE Product(name STRING, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE REL TABLE Reviews(FROM Person TO Product, rating FLOAT64, helpful BOOL)").unwrap();
+        db.execute("CREATE (:Person {name: 'Alice'})").unwrap();
+        db.execute("CREATE (:Product {name: 'Widget'})").unwrap();
+        db.execute("MATCH (a:Person {name: 'Alice'}), (p:Product {name: 'Widget'}) CREATE (a)-[:Reviews {rating: 4.5, helpful: true}]->(p)").unwrap();
+
+        let result = db.execute("MATCH (a:Person)-[r:Reviews]->(p:Product) RETURN a.name, r.rating, r.helpful, p.name").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("r.rating"), Some(&Value::Float64(4.5)));
+        assert_eq!(result.get_row(0).unwrap().get("r.helpful"), Some(&Value::Bool(true)));
+    }
+
+    // C-MIX-01: Mixed-type table
+    #[test]
+    fn test_c_mix_01_mixed_type_table() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Item(id INT64, name STRING, price FLOAT64, inStock BOOL, PRIMARY KEY(id))").unwrap();
+        db.execute("CREATE (:Item {id: 1, name: 'Widget', price: 19.99, inStock: true})").unwrap();
+        db.execute("CREATE (:Item {id: 2, name: 'Gadget', price: 49.99, inStock: false})").unwrap();
+        db.execute("CREATE (:Item {id: 3, name: 'Doohickey', price: 5.50, inStock: true})").unwrap();
+
+        // Filter by BOOL + FLOAT64
+        let result = db.execute("MATCH (i:Item) WHERE i.inStock = true RETURN i.name, i.price").unwrap();
+        assert_eq!(result.row_count(), 2);
+
+        let result = db.execute("MATCH (i:Item) WHERE i.price > 10.0 RETURN i.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+}
