@@ -88,14 +88,16 @@ let results = db.execute("MATCH (p:Person) WHERE p.age > 20 RETURN p.name, p.age
 ### Phase 1: Persistent Storage — Done
 - Disk-based storage with buffer pool, WAL with crash recovery, relationship/edge support (CSR), bulk CSV import
 
-### Phase 2: Query Engine — In Progress
+### Phase 2: Storage & Query Language — In Progress
+- Columnar-file storage (file-per-column, matching KuzuDB architecture)
+- Full Cypher support
 - Apache DataFusion integration, graph-specific operators, query optimization
 
 ### Phase 3: Transactions & MVP
 - MVCC, checkpointing, performance tuning, production-ready v0.1.0
 
 ### Phase 4+: Future
-- Multi-writer MVCC, columnar-file storage, advanced compression, full Cypher support, Parquet import/export
+- Multi-writer MVCC, advanced compression, Parquet import/export
 
 ## Reference
 
