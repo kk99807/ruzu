@@ -1,24 +1,20 @@
 //! Physical plan mapping from logical to physical operators.
 
-use std::sync::Arc;
-
 use crate::binder::Direction;
 use crate::catalog::Catalog;
-use crate::error::{Result, RuzuError};
-use crate::storage::NodeTable;
 
 use super::logical_plan::LogicalPlan;
 
 /// Maps logical plan to physical plan.
 pub struct PlanMapper<'a> {
-    catalog: &'a Catalog,
+    _catalog: &'a Catalog,
 }
 
 impl<'a> PlanMapper<'a> {
     /// Creates a new plan mapper.
     #[must_use]
     pub fn new(catalog: &'a Catalog) -> Self {
-        PlanMapper { catalog }
+        PlanMapper { _catalog: catalog }
     }
 
     /// Converts a logical plan to a description string for debugging.

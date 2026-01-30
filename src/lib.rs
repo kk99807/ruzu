@@ -583,11 +583,6 @@ impl Database {
         Ok(())
     }
 
-    /// Saves the catalog to disk (deprecated, use `save_all_data`).
-    fn save_catalog(&self) -> Result<()> {
-        self.save_all_data()
-    }
-
     /// Saves the database header to disk.
     fn save_header(&mut self) -> Result<()> {
         use storage::PageId;
@@ -1485,7 +1480,7 @@ impl Database {
         // Multi-hop traversal using BFS when path_bounds is set
         if let Some((min_hops, max_hops)) = path_bounds {
             // BFS-based multi-hop traversal with cycle detection
-            use std::collections::{HashSet, VecDeque};
+            use std::collections::VecDeque;
 
             for src_offset in &src_offsets {
                 // Queue entries: (current_node, depth, path)
@@ -1501,7 +1496,7 @@ impl Database {
                     // Get edges from current node
                     let edges = rel_table.get_forward_edges(current_node);
 
-                    for (next_node, rel_id) in edges {
+                    for (next_node, _rel_id) in edges {
                         // Cycle detection - skip if we've already visited this node
                         if path.contains(&next_node) {
                             continue;

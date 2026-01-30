@@ -391,6 +391,7 @@ impl PageHandle<'_> {
 
     /// Returns a read-only view of the page data.
     #[must_use]
+    #[allow(unsafe_code)]
     pub fn data(&self) -> &[u8] {
         let frame = self.pool.frames[self.frame_idx].read();
         // SAFETY: The data lives as long as the frame, and we hold a reference to the pool
@@ -399,6 +400,7 @@ impl PageHandle<'_> {
     }
 
     /// Returns a mutable view of the page data and marks the page as dirty.
+    #[allow(unsafe_code)]
     pub fn data_mut(&mut self) -> &mut [u8] {
         let mut frame = self.pool.frames[self.frame_idx].write();
         frame.dirty = true;

@@ -371,7 +371,7 @@ fn test_explain_shows_filter_pushdown() {
     let schema = catalog.get_table("Person").unwrap();
 
     // Create a scan with filter pushed down
-    let mut scan = LogicalPlan::node_scan("Person".to_string(), "p".to_string(), schema);
+    let scan = LogicalPlan::node_scan("Person".to_string(), "p".to_string(), schema);
 
     // Add a filter predicate
     let predicate = BoundExpression::comparison(

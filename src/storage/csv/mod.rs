@@ -642,7 +642,7 @@ mod tests {
         assert!(CsvImportConfig::default().validate().is_ok());
 
         // Invalid num_threads
-        let config = CsvImportConfig::default().with_num_threads(0);
+        let _config = CsvImportConfig::default().with_num_threads(0);
         // Note: with_num_threads sets Some(0), we need to test the validate
         let mut config = CsvImportConfig::default();
         config.num_threads = Some(0);

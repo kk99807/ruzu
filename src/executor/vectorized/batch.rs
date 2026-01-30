@@ -1,7 +1,5 @@
 //! Vectorized batch wrapper around Arrow RecordBatch.
 
-use std::sync::Arc;
-
 use arrow::array::{Array, ArrayRef, UInt32Array};
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
@@ -178,6 +176,7 @@ impl SelectionVector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use arrow::array::Int64Array;
     use arrow::datatypes::{DataType, Field, Schema};
 

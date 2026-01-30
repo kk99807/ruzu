@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionConfig;
 use futures::StreamExt;
@@ -102,15 +102,9 @@ impl QueryExecutor {
             .with_batch_size(config.batch_size);
 
         // Configure runtime environment
-        let runtime_config = if config.memory_limit > 0 {
-            RuntimeConfig::new()
-        } else {
-            RuntimeConfig::new()
-        };
-
-        let runtime_env = Arc::new(RuntimeEnv::new(runtime_config).unwrap_or_else(|_| {
-            RuntimeEnv::new(RuntimeConfig::new()).expect("Failed to create runtime environment")
-        }));
+        let runtime_env = RuntimeEnvBuilder::new()
+            .build_arc()
+            .expect("Failed to create runtime environment");
 
         let session_ctx = SessionContext::new_with_config_rt(session_config, runtime_env);
 

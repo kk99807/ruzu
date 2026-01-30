@@ -49,6 +49,7 @@ impl VmRegion {
     /// # Safety
     ///
     /// The caller must ensure exclusive access to the file.
+    #[allow(unsafe_code)]
     pub fn new(path: &Path, num_frames: usize) -> io::Result<Self> {
         let size = num_frames * PAGE_SIZE;
 

@@ -229,7 +229,7 @@ mod tests {
         let shared = shared_interner();
         let mut handles = vec![];
 
-        for i in 0..4 {
+        for _i in 0..4 {
             let shared_clone = Arc::clone(&shared);
             let handle = thread::spawn(move || {
                 for j in 0..100 {

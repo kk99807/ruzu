@@ -1015,7 +1015,6 @@ mod crash_recovery_tests {
         WalPayload, WalReader, WalRecord, WalRecordType, WalReplayer, WalWriter,
     };
     use ruzu::{Database, DatabaseConfig, Value};
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     // -------------------------------------------------------------------------
@@ -1026,7 +1025,7 @@ mod crash_recovery_tests {
     fn test_crash_recovery_committed_transaction() {
         let temp_dir = TempDir::new().expect("create temp dir");
         let db_path = temp_dir.path().join("test_db");
-        let wal_path = db_path.join("wal.log");
+        let _wal_path = db_path.join("wal.log");
 
         // Create database and add data, simulating a crash before checkpoint
         {
@@ -1628,8 +1627,8 @@ mod crash_recovery_tests {
     #[test]
     fn test_open_v1_database_with_v2_code() {
         use ruzu::storage::{
-            BufferPool, DatabaseHeader, DatabaseHeaderV1, DiskManager, PageId, PageRange,
-            CURRENT_VERSION, MAGIC_BYTES, PAGE_SIZE,
+            BufferPool, DatabaseHeaderV1, DiskManager, PageId, PageRange,
+            MAGIC_BYTES,
         };
         use std::fs;
         use uuid::Uuid;
@@ -3138,16 +3137,11 @@ mod csv_import_tests {
 // =============================================================================
 
 mod memory_constrained_tests {
-    use ruzu::storage::{BufferPool, BufferPoolStats, DiskManager, PageId, PAGE_SIZE};
+    use ruzu::storage::{BufferPool, DiskManager};
     use ruzu::{Database, DatabaseConfig, Value};
     use std::sync::Arc;
     use std::thread;
     use tempfile::TempDir;
-
-    /// Helper to calculate the number of frames for a given buffer size in bytes
-    fn frames_for_bytes(bytes: usize) -> usize {
-        bytes / PAGE_SIZE
-    }
 
     /// Helper to create test database with custom buffer pool size
     fn create_db_with_buffer_size(buffer_size: usize) -> (Database, TempDir) {
@@ -3763,7 +3757,7 @@ mod streaming_import_tests {
         let (path, _temp) = create_test_csv(csv_content);
 
         // Use streaming config with small batch size for testing
-        let streaming_config = StreamingConfig::new()
+        let _streaming_config = StreamingConfig::new()
             .with_batch_size(2)
             .with_streaming_threshold(0); // Always use streaming
 

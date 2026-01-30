@@ -1323,7 +1323,7 @@ mod memory_contract_tests {
     /// Ensures that databases with zero relationships can be saved and loaded
     #[test]
     fn test_empty_rel_table_save_load() {
-        use ruzu::storage::{CsrNodeGroup, RelTableData};
+        use ruzu::storage::RelTableData;
         use std::collections::HashMap;
 
         // Create empty RelTableData

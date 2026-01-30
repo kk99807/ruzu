@@ -7,11 +7,11 @@
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray};
+use arrow::array::{ArrayRef, BooleanArray, Int64Array, StringArray};
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
-use ruzu::binder::{AggregateFunction, ArithmeticOp, BoundExpression, ComparisonOp, LogicalOp};
+use ruzu::binder::{AggregateFunction, BoundExpression, ComparisonOp};
 use ruzu::executor::vectorized::{SelectionVector, VectorizedBatch, VectorizedEvaluator};
 use ruzu::types::{DataType, Value};
 
@@ -264,7 +264,7 @@ fn test_batch_materialize() {
 fn test_aggregate_count_star_expression() {
     // Contract: T063 - COUNT(*) should count all rows
     let batch = create_test_batch();
-    let vbatch = VectorizedBatch::new(batch);
+    let _vbatch = VectorizedBatch::new(batch);
 
     // COUNT(*) is represented as an aggregate without an inner expression
     let count_expr = BoundExpression::aggregate(
