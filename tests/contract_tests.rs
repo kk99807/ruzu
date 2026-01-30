@@ -2015,3 +2015,173 @@ mod type_system_contracts {
         assert_eq!(result.row_count(), 2);
     }
 }
+
+// =============================================================================
+// Multi-Page Data Format Stability Contract (T015)
+// =============================================================================
+
+mod multi_page_format_contracts {
+    use ruzu::storage::{BufferPool, DiskManager, PAGE_SIZE};
+    use ruzu::calculate_pages_needed;
+    use tempfile::TempDir;
+
+    /// Contract: Multi-page data format is [4-byte u32 LE length][data][zero-padding].
+    /// The length prefix stores the exact data length (excluding the prefix itself).
+    /// This format must remain stable across versions.
+    #[test]
+    fn test_multi_page_format_length_prefix_is_u32_le() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let dm = DiskManager::new(&db_path).unwrap();
+        let pool = BufferPool::new(64, dm).unwrap();
+
+        let data = vec![0xAA; 100];
+        let range = pool.allocate_page_range(1).unwrap();
+
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+
+        // Read raw page and verify format
+        use ruzu::storage::PageId;
+        let handle = pool.pin(PageId::new(0, range.start_page)).unwrap();
+        let raw = handle.data();
+
+        // First 4 bytes = length prefix (u32 LE)
+        let len = u32::from_le_bytes(raw[0..4].try_into().unwrap());
+        assert_eq!(len, 100);
+
+        // Next 100 bytes = data
+        assert_eq!(&raw[4..104], &data[..]);
+
+        // Remaining bytes in page are zero-padded
+        assert!(raw[104..].iter().all(|&b| b == 0));
+    }
+
+    /// Contract: Multi-page data spanning multiple pages keeps contiguous data
+    /// across page boundaries.
+    #[test]
+    fn test_multi_page_format_cross_page_contiguity() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let dm = DiskManager::new(&db_path).unwrap();
+        let pool = BufferPool::new(64, dm).unwrap();
+
+        // Data that spans 2 pages: PAGE_SIZE - 4 bytes of data + 4 prefix = exactly 1 page
+        // So PAGE_SIZE - 3 bytes of data + 4 prefix = PAGE_SIZE + 1 = needs 2 pages
+        let data: Vec<u8> = (0..(PAGE_SIZE + 100)).map(|i| (i % 256) as u8).collect();
+        let num_pages = calculate_pages_needed(data.len());
+        assert_eq!(num_pages, 2);
+
+        let range = pool.allocate_page_range(num_pages).unwrap();
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+
+        // Read back and verify
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        assert_eq!(result, data);
+    }
+
+    /// Contract: calculate_pages_needed formula is ceil((data_len + 4) / PAGE_SIZE).
+    #[test]
+    fn test_pages_needed_formula_contract() {
+        // The formula must be: ceil((data_len + 4) / PAGE_SIZE)
+        assert_eq!(calculate_pages_needed(0), 1);
+        assert_eq!(calculate_pages_needed(PAGE_SIZE - 4), 1);
+        assert_eq!(calculate_pages_needed(PAGE_SIZE - 3), 2);
+        assert_eq!(calculate_pages_needed(2 * PAGE_SIZE - 4), 2);
+        assert_eq!(calculate_pages_needed(2 * PAGE_SIZE - 3), 3);
+    }
+
+    // =========================================================================
+    // T019: Node data multi-page serialization format stability
+    // =========================================================================
+
+    /// Contract: Node table data serialized via save_all_data() and loaded via
+    /// load_table_data() must round-trip correctly when data exceeds a single page.
+    ///
+    /// The format is:
+    /// - [4-byte LE length prefix][bincode-serialized HashMap<String, TableData>]
+    /// - Data spans a contiguous PageRange allocated by the disk manager.
+    /// - The header's metadata_range field records the range used.
+    #[test]
+    fn test_t019_node_data_multipage_format_stability() {
+        use ruzu::{Database, DatabaseConfig, Value};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        let num_rows = 200;
+
+        // Create database with > 4KB of node data
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute(
+                "CREATE NODE TABLE Person(id INT64, name STRING, age INT64, PRIMARY KEY(id))",
+            )
+            .unwrap();
+
+            for i in 0..num_rows {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'StableFormatTestPerson_{}', age: {}}})",
+                    i,
+                    i,
+                    25 + (i % 40)
+                ))
+                .unwrap();
+            }
+            db.close().unwrap();
+        }
+
+        // Reopen and verify the data can be read back (format stability)
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute("MATCH (p:Person) RETURN p.id, p.name, p.age")
+                .unwrap();
+            assert_eq!(
+                result.row_count(),
+                num_rows,
+                "Multi-page format must round-trip all {} rows",
+                num_rows
+            );
+
+            // Verify deterministic data at known positions
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 0 RETURN p.name, p.age")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("StableFormatTestPerson_0".to_string()))
+            );
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.age"),
+                Some(&Value::Int64(25))
+            );
+
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 100 RETURN p.name, p.age")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("StableFormatTestPerson_100".to_string()))
+            );
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.age"),
+                Some(&Value::Int64(45)) // 25 + (100 % 40) = 25 + 20 = 45
+            );
+        }
+
+        // Reopen a second time to verify no corruption from multiple open/close cycles
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute("MATCH (p:Person) RETURN p.id")
+                .unwrap();
+            assert_eq!(
+                result.row_count(),
+                num_rows,
+                "Second reopen must still have all {} rows",
+                num_rows
+            );
+        }
+    }
+}

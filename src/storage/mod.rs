@@ -69,6 +69,32 @@ impl PageRange {
     pub const fn is_empty(&self) -> bool {
         self.num_pages == 0
     }
+
+    /// Returns the total byte capacity of this page range.
+    #[must_use]
+    pub const fn byte_capacity(&self) -> usize {
+        self.num_pages as usize * PAGE_SIZE
+    }
+
+    /// Returns true if this range shares any pages with `other`.
+    ///
+    /// Empty ranges (num_pages == 0) never overlap with anything.
+    #[must_use]
+    pub const fn overlaps(&self, other: &PageRange) -> bool {
+        if self.num_pages == 0 || other.num_pages == 0 {
+            return false;
+        }
+        self.start_page < other.end_page() && other.start_page < self.end_page()
+    }
+
+    /// Returns true if the given page index is within this range.
+    #[must_use]
+    pub const fn contains_page(&self, page_idx: u32) -> bool {
+        if self.num_pages == 0 {
+            return false;
+        }
+        page_idx >= self.start_page && page_idx < self.end_page()
+    }
 }
 
 /// Database header stored in page 0 of the database file.
@@ -177,6 +203,58 @@ impl DatabaseHeader {
                 "Unsupported database version: {} (max supported: {})",
                 self.version, CURRENT_VERSION
             )));
+        }
+
+        Ok(())
+    }
+
+    /// Validates that all page ranges in the header are consistent.
+    ///
+    /// Checks:
+    /// 1. No range overlaps with page 0 (header page)
+    /// 2. No two ranges overlap with each other
+    /// 3. All range start pages are > 0 (for non-empty ranges)
+    ///
+    /// # Errors
+    ///
+    /// Returns `PageRangeOverlap` if any ranges overlap with each other or with page 0.
+    pub fn validate_ranges(&self) -> crate::error::Result<()> {
+        use crate::error::RuzuError;
+
+        let header_page = PageRange::new(0, 1);
+        let ranges = [
+            ("catalog_range", &self.catalog_range),
+            ("metadata_range", &self.metadata_range),
+            ("rel_metadata_range", &self.rel_metadata_range),
+        ];
+
+        // Check each range doesn't overlap with header
+        for (name, range) in &ranges {
+            if !range.is_empty() {
+                if range.start_page == 0 {
+                    return Err(RuzuError::PageRangeOverlap(format!(
+                        "{name} overlaps with header page 0"
+                    )));
+                }
+                if range.overlaps(&header_page) {
+                    return Err(RuzuError::PageRangeOverlap(format!(
+                        "{name} overlaps with header page"
+                    )));
+                }
+            }
+        }
+
+        // Check pairwise overlaps
+        for i in 0..ranges.len() {
+            for j in (i + 1)..ranges.len() {
+                let (name_a, range_a) = &ranges[i];
+                let (name_b, range_b) = &ranges[j];
+                if range_a.overlaps(range_b) {
+                    return Err(RuzuError::PageRangeOverlap(format!(
+                        "{name_a} overlaps with {name_b}"
+                    )));
+                }
+            }
         }
 
         Ok(())

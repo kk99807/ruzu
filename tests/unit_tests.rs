@@ -1346,3 +1346,262 @@ mod progress_reporting_tests {
         // Just verify the test runs without errors
     }
 }
+
+// =============================================================================
+// Multi-Page Storage Foundation Tests (T010-T015)
+// =============================================================================
+
+mod multi_page_foundation_tests {
+    use ruzu::storage::{BufferPool, DiskManager, PageRange, PAGE_SIZE};
+    use ruzu::calculate_pages_needed;
+    use ruzu::storage::DatabaseHeader;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    // -------------------------------------------------------------------------
+    // T010: PageRange helper tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_page_range_byte_capacity() {
+        let range = PageRange::new(1, 1);
+        assert_eq!(range.byte_capacity(), PAGE_SIZE);
+
+        let range = PageRange::new(1, 3);
+        assert_eq!(range.byte_capacity(), 3 * PAGE_SIZE);
+
+        let empty = PageRange::new(0, 0);
+        assert_eq!(empty.byte_capacity(), 0);
+    }
+
+    #[test]
+    fn test_page_range_overlaps() {
+        // Overlapping ranges
+        let a = PageRange::new(1, 3); // pages 1,2,3
+        let b = PageRange::new(3, 2); // pages 3,4
+        assert!(a.overlaps(&b));
+        assert!(b.overlaps(&a));
+
+        // Non-overlapping ranges
+        let c = PageRange::new(1, 2); // pages 1,2
+        let d = PageRange::new(3, 2); // pages 3,4
+        assert!(!c.overlaps(&d));
+        assert!(!d.overlaps(&c));
+
+        // Adjacent ranges don't overlap
+        let e = PageRange::new(1, 2); // pages 1,2
+        let f = PageRange::new(3, 1); // page 3
+        assert!(!e.overlaps(&f));
+
+        // Empty ranges never overlap
+        let empty = PageRange::new(0, 0);
+        let nonempty = PageRange::new(0, 1);
+        assert!(!empty.overlaps(&nonempty));
+        assert!(!nonempty.overlaps(&empty));
+        assert!(!empty.overlaps(&empty));
+    }
+
+    #[test]
+    fn test_page_range_contains_page() {
+        let range = PageRange::new(5, 3); // pages 5,6,7
+        assert!(range.contains_page(5));
+        assert!(range.contains_page(6));
+        assert!(range.contains_page(7));
+        assert!(!range.contains_page(4));
+        assert!(!range.contains_page(8));
+
+        let empty = PageRange::new(0, 0);
+        assert!(!empty.contains_page(0));
+    }
+
+    // -------------------------------------------------------------------------
+    // T011: DiskManager::allocate_page_range tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_allocate_page_range_basic() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let mut dm = DiskManager::new(&db_path).unwrap();
+
+        let range = dm.allocate_page_range(3).unwrap();
+        assert_eq!(range.start_page, 0);
+        assert_eq!(range.num_pages, 3);
+        assert_eq!(dm.num_pages(), 3);
+        assert_eq!(dm.file_size().unwrap(), 3 * PAGE_SIZE as u64);
+    }
+
+    #[test]
+    fn test_allocate_page_range_sequential() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let mut dm = DiskManager::new(&db_path).unwrap();
+
+        let r1 = dm.allocate_page_range(2).unwrap();
+        let r2 = dm.allocate_page_range(3).unwrap();
+
+        assert_eq!(r1.start_page, 0);
+        assert_eq!(r1.num_pages, 2);
+        assert_eq!(r2.start_page, 2);
+        assert_eq!(r2.num_pages, 3);
+        assert!(!r1.overlaps(&r2));
+    }
+
+    #[test]
+    fn test_allocate_page_range_zero_pages_fails() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let mut dm = DiskManager::new(&db_path).unwrap();
+
+        let result = dm.allocate_page_range(0);
+        assert!(result.is_err());
+    }
+
+    // -------------------------------------------------------------------------
+    // T012: calculate_pages_needed tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_calculate_pages_needed() {
+        // 0 bytes data → 1 page (for length prefix alone)
+        assert_eq!(calculate_pages_needed(0), 1);
+
+        // Exactly fits in 1 page: 4092 bytes data + 4 bytes prefix = 4096
+        assert_eq!(calculate_pages_needed(PAGE_SIZE - 4), 1);
+
+        // Spills to 2 pages: 4093 bytes data + 4 prefix = 4097 > 4096
+        assert_eq!(calculate_pages_needed(PAGE_SIZE - 3), 2);
+
+        // Exactly 2 pages: 8188 bytes data + 4 prefix = 8192
+        assert_eq!(calculate_pages_needed(2 * PAGE_SIZE - 4), 2);
+
+        // Spills to 3 pages
+        assert_eq!(calculate_pages_needed(2 * PAGE_SIZE - 3), 3);
+    }
+
+    // -------------------------------------------------------------------------
+    // T013: write_multi_page / read_multi_page round-trip tests
+    // -------------------------------------------------------------------------
+
+    fn create_test_buffer_pool() -> (BufferPool, TempDir) {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+        let dm = DiskManager::new(&db_path).unwrap();
+        let pool = BufferPool::new(64, dm).unwrap();
+        (pool, temp_dir)
+    }
+
+    #[test]
+    fn test_multi_page_roundtrip_single_page() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        // Allocate pages via buffer pool's disk manager
+        let range = pool.allocate_page_range(1).unwrap();
+
+        let data = b"hello world";
+        ruzu::write_multi_page_test(&pool, &range, data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_multi_page_roundtrip_multiple_pages() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        // Create data larger than one page
+        let data: Vec<u8> = (0..PAGE_SIZE * 2 + 100)
+            .map(|i| (i % 256) as u8)
+            .collect();
+
+        let num_pages = calculate_pages_needed(data.len());
+        let range = pool.allocate_page_range(num_pages).unwrap();
+
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_multi_page_roundtrip_empty_data() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        let range = pool.allocate_page_range(1).unwrap();
+
+        let data: &[u8] = &[];
+        ruzu::write_multi_page_test(&pool, &range, data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_multi_page_exact_page_boundary() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        // Data that exactly fills one page (with length prefix)
+        let data: Vec<u8> = vec![0xAB; PAGE_SIZE - 4];
+        let range = pool.allocate_page_range(1).unwrap();
+
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result, data);
+    }
+
+    #[test]
+    fn test_read_multi_page_empty_range_fails() {
+        let (pool, _tmp) = create_test_buffer_pool();
+        let empty_range = PageRange::new(0, 0);
+        let result = ruzu::read_multi_page_test(&pool, &empty_range);
+        assert!(result.is_err());
+    }
+
+    // -------------------------------------------------------------------------
+    // T014: DatabaseHeader::validate_ranges tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_ranges_valid() {
+        let mut header = DatabaseHeader::new(Uuid::new_v4());
+        header.catalog_range = PageRange::new(1, 1);
+        header.metadata_range = PageRange::new(2, 1);
+        header.rel_metadata_range = PageRange::new(3, 1);
+        assert!(header.validate_ranges().is_ok());
+    }
+
+    #[test]
+    fn test_validate_ranges_multi_page_valid() {
+        let mut header = DatabaseHeader::new(Uuid::new_v4());
+        header.catalog_range = PageRange::new(1, 2);
+        header.metadata_range = PageRange::new(3, 5);
+        header.rel_metadata_range = PageRange::new(8, 3);
+        assert!(header.validate_ranges().is_ok());
+    }
+
+    #[test]
+    fn test_validate_ranges_overlap_header() {
+        let mut header = DatabaseHeader::new(Uuid::new_v4());
+        header.catalog_range = PageRange::new(0, 1); // overlaps header page 0
+        header.metadata_range = PageRange::new(2, 1);
+        header.rel_metadata_range = PageRange::new(3, 1);
+        assert!(header.validate_ranges().is_err());
+    }
+
+    #[test]
+    fn test_validate_ranges_overlap_each_other() {
+        let mut header = DatabaseHeader::new(Uuid::new_v4());
+        header.catalog_range = PageRange::new(1, 3); // pages 1,2,3
+        header.metadata_range = PageRange::new(3, 2); // pages 3,4 — overlaps!
+        header.rel_metadata_range = PageRange::new(5, 1);
+        assert!(header.validate_ranges().is_err());
+    }
+
+    #[test]
+    fn test_validate_ranges_empty_ranges_ok() {
+        let header = DatabaseHeader::new(Uuid::new_v4());
+        // Default has catalog_range(1,0), metadata_range(0,0), rel_metadata_range(0,0)
+        assert!(header.validate_ranges().is_ok());
+    }
+}

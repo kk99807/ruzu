@@ -140,6 +140,30 @@ impl DiskManager {
         Ok(page_id)
     }
 
+    /// Allocates a contiguous range of pages in the database file.
+    ///
+    /// Extends the file to accommodate `num_pages` new pages and returns
+    /// a `PageRange` identifying the allocated region.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `num_pages` is 0 or if file extension fails.
+    pub fn allocate_page_range(&mut self, num_pages: u32) -> Result<crate::storage::PageRange> {
+        if num_pages == 0 {
+            return Err(RuzuError::StorageError(
+                "Cannot allocate 0 pages".into(),
+            ));
+        }
+
+        let start_page = self.next_page_idx.fetch_add(num_pages, Ordering::Relaxed);
+        let new_size = (u64::from(start_page) + u64::from(num_pages)) * PAGE_SIZE as u64;
+        self.file
+            .set_len(new_size)
+            .map_err(|e| RuzuError::StorageError(format!("Failed to extend file: {e}")))?;
+
+        Ok(crate::storage::PageRange::new(start_page, num_pages))
+    }
+
     /// Flushes all buffered writes to disk.
     ///
     /// # Errors

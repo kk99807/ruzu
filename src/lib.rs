@@ -31,6 +31,111 @@ use storage::{
 use types::DataType;
 use uuid::Uuid;
 
+/// Calculates the number of pages needed to store data with a 4-byte length prefix.
+///
+/// Formula: ceil((data_len + 4) / PAGE_SIZE)
+/// Minimum: 1 page (even for empty data, to store the length prefix).
+#[must_use]
+pub fn calculate_pages_needed(data_len: usize) -> u32 {
+    let total = data_len + 4; // 4 bytes for length prefix
+    total.div_ceil(PAGE_SIZE) as u32
+}
+
+/// Writes serialized data across a contiguous page range using the buffer pool.
+///
+/// Format: [4-byte length prefix (u32 LE)] [data bytes spanning pages]
+fn write_multi_page(
+    buffer_pool: &BufferPool,
+    range: &PageRange,
+    data: &[u8],
+) -> Result<()> {
+    use storage::PageId;
+
+    let total_len = data.len() + 4;
+    if total_len > range.byte_capacity() {
+        return Err(RuzuError::StorageError(format!(
+            "Data ({} bytes + 4 prefix) exceeds page range capacity ({} bytes)",
+            data.len(),
+            range.byte_capacity()
+        )));
+    }
+
+    // Build the full payload: [4-byte length][data]
+    let mut payload = Vec::with_capacity(total_len);
+    payload.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    payload.extend_from_slice(data);
+
+    // Write page by page
+    let mut offset = 0usize;
+    for i in 0..range.num_pages {
+        let page_id = PageId::new(0, range.start_page + i);
+        let mut handle = buffer_pool.pin(page_id)?;
+        let page_data = handle.data_mut();
+
+        let chunk_start = offset;
+        let chunk_end = (offset + PAGE_SIZE).min(payload.len());
+
+        if chunk_start < payload.len() {
+            let chunk = &payload[chunk_start..chunk_end];
+            page_data[..chunk.len()].copy_from_slice(chunk);
+            // Zero remaining bytes in this page
+            if chunk.len() < PAGE_SIZE {
+                page_data[chunk.len()..].fill(0);
+            }
+        } else {
+            // Entire page is padding
+            page_data.fill(0);
+        }
+
+        offset += PAGE_SIZE;
+    }
+
+    Ok(())
+}
+
+/// Reads serialized data from a contiguous page range using the buffer pool.
+///
+/// Reads the 4-byte length prefix from the first page, then assembles
+/// the data bytes from all pages in the range.
+fn read_multi_page(
+    buffer_pool: &BufferPool,
+    range: &PageRange,
+) -> Result<Vec<u8>> {
+    use storage::PageId;
+
+    if range.is_empty() {
+        return Err(RuzuError::StorageError(
+            "Cannot read from empty page range".into(),
+        ));
+    }
+
+    // Read all pages into a contiguous buffer
+    let mut raw = Vec::with_capacity(range.byte_capacity());
+    for i in 0..range.num_pages {
+        let page_id = PageId::new(0, range.start_page + i);
+        let handle = buffer_pool.pin(page_id)?;
+        raw.extend_from_slice(handle.data());
+    }
+
+    // Parse length prefix
+    if raw.len() < 4 {
+        return Err(RuzuError::MultiPageDataCorrupted(
+            "Page data too short for length prefix".into(),
+        ));
+    }
+    let data_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
+
+    if data_len + 4 > raw.len() {
+        return Err(RuzuError::MultiPageDataCorrupted(format!(
+            "Length prefix {} exceeds range capacity {}",
+            data_len,
+            raw.len() - 4
+        )));
+    }
+
+    Ok(raw[4..4 + data_len].to_vec())
+}
+
 /// Configuration for opening or creating a database.
 #[derive(Debug, Clone)]
 pub struct DatabaseConfig {
@@ -150,6 +255,9 @@ impl Database {
             header.metadata_range = PageRange::new(2, 1); // Reserve page 2 for table data
             header.rel_metadata_range = PageRange::new(3, 1); // Reserve page 3 for rel table data
             header.update_checksum();
+
+            // Pre-allocate reserved pages (0-3) so the allocator doesn't reuse them
+            buffer_pool.allocate_page_range(4)?;
 
             (Catalog::new(), header, false)
         } else {
@@ -360,24 +468,17 @@ impl Database {
         catalog: &Catalog,
         header: &DatabaseHeader,
     ) -> Result<HashMap<String, Arc<NodeTable>>> {
-        use storage::{PageId, TableData};
+        use storage::TableData;
 
         let mut tables = HashMap::new();
 
-        // Data pages start after catalog (page 2 onwards, since page 0 = header, page 1 = catalog)
+        // T021: Read node table data using multi-page support
         if header.metadata_range.num_pages > 0 {
-            let data_page_id = PageId::new(0, header.metadata_range.start_page);
-            let data_handle = buffer_pool.pin(data_page_id)?;
-            let data = data_handle.data();
+            let table_data_bytes = read_multi_page(buffer_pool, &header.metadata_range)?;
 
-            // Read length prefix
-            let len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-            if len > 0 && len < PAGE_SIZE - 4 {
-                let table_data_bytes = &data[4..4 + len];
-
-                // Deserialize the table data map
+            if !table_data_bytes.is_empty() {
                 if let Ok(table_data_map) =
-                    bincode::deserialize::<HashMap<String, TableData>>(table_data_bytes)
+                    bincode::deserialize::<HashMap<String, TableData>>(&table_data_bytes)
                 {
                     for (table_name, table_data) in table_data_map {
                         if let Some(schema) = catalog.get_table(&table_name) {
@@ -503,7 +604,7 @@ impl Database {
     }
 
     /// Saves all data (catalog and table data) to disk.
-    fn save_all_data(&self) -> Result<()> {
+    fn save_all_data(&mut self) -> Result<()> {
         use storage::{PageId, TableData};
 
         let buffer_pool = self
@@ -538,17 +639,31 @@ impl Database {
 
         let table_data_bytes = bincode::serialize(&table_data_map)
             .map_err(|e| RuzuError::StorageError(format!("Failed to serialize table data: {e}")))?;
-        let table_data_len = table_data_bytes.len();
 
-        // Write table data to page 2
-        if header.metadata_range.num_pages > 0 && table_data_len < PAGE_SIZE - 4 {
-            let data_page_id = PageId::new(0, header.metadata_range.start_page);
-            let mut data_handle = buffer_pool.pin(data_page_id)?;
+        // T020: Write node table data using multi-page support
+        let pages_needed = calculate_pages_needed(table_data_bytes.len());
+        let current_metadata_range = header.metadata_range;
 
-            let data = data_handle.data_mut();
-            data[0..4].copy_from_slice(&(table_data_len as u32).to_le_bytes());
-            data[4..4 + table_data_len].copy_from_slice(&table_data_bytes);
+        let node_data_range = if pages_needed <= current_metadata_range.num_pages {
+            // Reuse existing range (fits in already allocated pages)
+            current_metadata_range
+        } else {
+            // Allocate new contiguous range
+            buffer_pool.allocate_page_range(pages_needed)?
+        };
+
+        write_multi_page(buffer_pool, &node_data_range, &table_data_bytes)?;
+
+        // T022: Update header metadata_range to reflect the (possibly new) range
+        if let Some(ref mut header) = self.header {
+            header.metadata_range = node_data_range;
         }
+
+        // Re-borrow header after mutation
+        let header = self
+            .header
+            .as_ref()
+            .ok_or_else(|| RuzuError::StorageError("No header in in-memory mode".into()))?;
 
         // T024: Serialize relationship table data
         use storage::RelTableData;
@@ -2042,6 +2157,25 @@ fn literal_into_value(literal: Literal) -> Value {
         Literal::Float64(f) => Value::Float64(f),
         Literal::Bool(b) => Value::Bool(b),
     }
+}
+
+/// Test helper: exposes write_multi_page for integration tests.
+#[doc(hidden)]
+pub fn write_multi_page_test(
+    buffer_pool: &BufferPool,
+    range: &PageRange,
+    data: &[u8],
+) -> Result<()> {
+    write_multi_page(buffer_pool, range, data)
+}
+
+/// Test helper: exposes read_multi_page for integration tests.
+#[doc(hidden)]
+pub fn read_multi_page_test(
+    buffer_pool: &BufferPool,
+    range: &PageRange,
+) -> Result<Vec<u8>> {
+    read_multi_page(buffer_pool, range)
 }
 
 impl Drop for Database {

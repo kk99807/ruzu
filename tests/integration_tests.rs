@@ -4657,3 +4657,243 @@ mod datatype_integration {
         }
     }
 }
+
+// =============================================================================
+// Multi-Page Storage Tests (Feature 007-multi-page-storage, Phase 3: US1)
+// =============================================================================
+
+mod multi_page_node_storage_tests {
+    use ruzu::{Database, DatabaseConfig, Value};
+    use tempfile::TempDir;
+
+    // -------------------------------------------------------------------------
+    // T016: Node data exceeding 4KB persists across close/reopen
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_t016_node_data_exceeding_4kb_persists() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        let num_rows = 200; // Each row ~40-50 bytes serialized; 200 rows => ~8-10 KB
+
+        // Phase 1: Create and populate database with > 4KB of node data
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute(
+                "CREATE NODE TABLE Person(id INT64, name STRING, age INT64, PRIMARY KEY(id))",
+            )
+            .unwrap();
+
+            for i in 0..num_rows {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'PersonWithALongerName_{}', age: {}}})",
+                    i,
+                    i,
+                    20 + (i % 50)
+                ))
+                .unwrap();
+            }
+
+            // Verify data before close
+            let result = db
+                .execute("MATCH (p:Person) RETURN p.id, p.name, p.age")
+                .unwrap();
+            assert_eq!(result.row_count(), num_rows);
+
+            db.close().unwrap();
+        }
+
+        // Phase 2: Reopen and verify all data is intact
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute("MATCH (p:Person) RETURN p.id, p.name, p.age")
+                .unwrap();
+            assert_eq!(
+                result.row_count(),
+                num_rows,
+                "Expected {} rows after reopen, got {}",
+                num_rows,
+                result.row_count()
+            );
+
+            // Verify first row
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 0 RETURN p.name, p.age")
+                .unwrap();
+            assert_eq!(result.row_count(), 1);
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("PersonWithALongerName_0".to_string()))
+            );
+
+            // Verify last row
+            let result = db
+                .execute(&format!(
+                    "MATCH (p:Person) WHERE p.id = {} RETURN p.name",
+                    num_rows - 1
+                ))
+                .unwrap();
+            assert_eq!(result.row_count(), 1);
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String(format!(
+                    "PersonWithALongerName_{}",
+                    num_rows - 1
+                )))
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // T017: Multiple node tables with combined data > 4KB
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_t017_multiple_node_tables_combined_gt_4kb() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        let rows_per_table: usize = 80;
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+
+            db.execute(
+                "CREATE NODE TABLE Person(id INT64, name STRING, age INT64, PRIMARY KEY(id))",
+            )
+            .unwrap();
+            db.execute(
+                "CREATE NODE TABLE Company(id INT64, name STRING, founded INT64, PRIMARY KEY(id))",
+            )
+            .unwrap();
+
+            for i in 0..rows_per_table {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'Person_{}', age: {}}})",
+                    i, i, 20 + i
+                ))
+                .unwrap();
+                db.execute(&format!(
+                    "CREATE (:Company {{id: {}, name: 'Company_{}', founded: {}}})",
+                    i, i, 1990 + i
+                ))
+                .unwrap();
+            }
+
+            db.close().unwrap();
+        }
+
+        // Reopen and verify both tables
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+
+            let persons = db.execute("MATCH (p:Person) RETURN p.id").unwrap();
+            assert_eq!(persons.row_count(), rows_per_table);
+
+            let companies = db.execute("MATCH (c:Company) RETURN c.id").unwrap();
+            assert_eq!(companies.row_count(), rows_per_table);
+
+            // Verify specific data
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 50 RETURN p.name")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("Person_50".to_string()))
+            );
+
+            let result = db
+                .execute("MATCH (c:Company) WHERE c.id = 50 RETURN c.name")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("c.name"),
+                Some(&Value::String("Company_50".to_string()))
+            );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // T018: Node data grows from < 4KB to > 4KB after additional inserts
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_t018_node_data_grows_beyond_4kb() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        // Phase 1: Create database with < 4KB data
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute(
+                "CREATE NODE TABLE Person(id INT64, name STRING, age INT64, PRIMARY KEY(id))",
+            )
+            .unwrap();
+
+            for i in 0..10 {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'Person_{}', age: {}}})",
+                    i, i, 20 + i
+                ))
+                .unwrap();
+            }
+            db.close().unwrap();
+        }
+
+        // Phase 2: Verify small data round-trips
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (p:Person) RETURN p.id").unwrap();
+            assert_eq!(result.row_count(), 10);
+            db.close().unwrap();
+        }
+
+        // Phase 3: Add more data to exceed 4KB
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+
+            for i in 10..250 {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'PersonWithALongerName_{}', age: {}}})",
+                    i,
+                    i,
+                    20 + (i % 50)
+                ))
+                .unwrap();
+            }
+
+            let result = db.execute("MATCH (p:Person) RETURN p.id").unwrap();
+            assert_eq!(result.row_count(), 250);
+
+            db.close().unwrap();
+        }
+
+        // Phase 4: Final reopen, verify all 250 rows
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute("MATCH (p:Person) RETURN p.id, p.name, p.age")
+                .unwrap();
+            assert_eq!(result.row_count(), 250);
+
+            // Check first row (from phase 1)
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 0 RETURN p.name")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("Person_0".to_string()))
+            );
+
+            // Check last row (from phase 3)
+            let result = db
+                .execute("MATCH (p:Person) WHERE p.id = 249 RETURN p.name")
+                .unwrap();
+            assert_eq!(
+                result.get_row(0).unwrap().get("p.name"),
+                Some(&Value::String("PersonWithALongerName_249".to_string()))
+            );
+        }
+    }
+}
