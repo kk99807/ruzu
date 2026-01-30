@@ -142,15 +142,16 @@ impl Database {
         let num_frames = config.buffer_pool_size / PAGE_SIZE;
         let buffer_pool = BufferPool::new(num_frames, disk_manager)?;
 
-        let (mut catalog, header) = if is_new {
+        let (mut catalog, header, was_migrated) = if is_new {
             // Initialize new database
             let db_id = Uuid::new_v4();
             let mut header = DatabaseHeader::new(db_id);
             header.catalog_range = PageRange::new(1, 1); // Reserve page 1 for catalog
             header.metadata_range = PageRange::new(2, 1); // Reserve page 2 for table data
+            header.rel_metadata_range = PageRange::new(3, 1); // Reserve page 3 for rel table data
             header.update_checksum();
 
-            (Catalog::new(), header)
+            (Catalog::new(), header, false)
         } else {
             // Load existing database
             Self::load_database(&buffer_pool)?
@@ -174,20 +175,35 @@ impl Database {
         // Initialize WAL writer
         let wal_writer = WalWriter::new(&wal_file_path, header.database_id, config.wal_checksums)?;
 
+        // T023: Load relationship table data from disk
+        let mut rel_tables = if is_new {
+            // Create empty relationship tables for new database
+            let mut rel_tables = HashMap::new();
+            for rel_name in catalog.rel_table_names() {
+                if let Some(schema) = catalog.get_rel_table(rel_name) {
+                    let rel_table = RelTable::new(schema);
+                    rel_tables.insert(rel_name.to_string(), rel_table);
+                }
+            }
+            rel_tables
+        } else {
+            Self::load_rel_table_data(&buffer_pool, &catalog, &header)?
+        };
+
         // Perform WAL recovery if WAL file exists and has records
         if wal_file_path.exists() && !is_new {
-            Self::replay_wal(&wal_file_path, &mut catalog, &mut tables)?;
+            Self::replay_wal(&wal_file_path, &mut catalog, &mut tables, &mut rel_tables)?;
         }
 
         Ok(Database {
             catalog,
             tables,
-            rel_tables: HashMap::new(), // TODO: Load rel_tables from disk
+            rel_tables,
             db_path: Some(path.to_path_buf()),
             buffer_pool: Some(buffer_pool),
             config,
             header: Some(header),
-            dirty: is_new, // New databases need to be saved
+            dirty: is_new || was_migrated, // New databases or migrated databases need to be saved
             wal_writer: Some(wal_writer),
             checkpointer: Checkpointer::new(),
             next_tx_id: AtomicU64::new(1),
@@ -199,6 +215,7 @@ impl Database {
         wal_path: &Path,
         catalog: &mut Catalog,
         tables: &mut HashMap<String, Arc<NodeTable>>,
+        rel_tables: &mut HashMap<String, RelTable>,
     ) -> Result<()> {
         // Open WAL reader
         let mut reader = match WalReader::open(wal_path) {
@@ -224,7 +241,7 @@ impl Database {
 
         // Apply only records from committed transactions
         for record in replayer.records_to_apply() {
-            Self::apply_wal_record(record, catalog, tables)?;
+            Self::apply_wal_record(record, catalog, tables, rel_tables)?;
         }
 
         Ok(())
@@ -235,6 +252,7 @@ impl Database {
         record: &WalRecord,
         catalog: &Catalog,
         tables: &mut HashMap<String, Arc<NodeTable>>,
+        rel_tables: &mut HashMap<String, RelTable>,
     ) -> Result<()> {
         match &record.payload {
             WalPayload::TableInsertion { table_id, rows } => {
@@ -262,6 +280,32 @@ impl Database {
                     }
                 }
             }
+            WalPayload::RelInsertion {
+                table_id,
+                src,
+                dst,
+                props,
+            } => {
+                // Find relationship table by ID (table_name_by_id checks both node and rel tables)
+                if let Some(rel_table_name) = catalog.table_name_by_id(*table_id) {
+                    // Ensure RelTable exists in memory (create if not present)
+                    // This handles the case where CREATE REL TABLE was checkpointed (in catalog)
+                    // but relationship data was not yet saved (only in WAL)
+                    if !rel_tables.contains_key(&rel_table_name) {
+                        // Get schema from catalog to create empty RelTable
+                        if let Some(rel_schema) = catalog.get_rel_table(&rel_table_name) {
+                            let rel_table = RelTable::new(rel_schema);
+                            rel_tables.insert(rel_table_name.clone(), rel_table);
+                        }
+                    }
+
+                    if let Some(rel_table) = rel_tables.get_mut(&rel_table_name) {
+                        // Insert relationship
+                        // During WAL replay, we don't need to validate (already validated at write time)
+                        let _ = rel_table.insert(*src, *dst, props.clone());
+                    }
+                }
+            }
             // Other payload types are not applied during recovery (schema changes, etc.)
             // They would be persisted via catalog serialization
             _ => {}
@@ -271,16 +315,21 @@ impl Database {
     }
 
     /// Loads the database header and catalog from disk.
-    fn load_database(buffer_pool: &BufferPool) -> Result<(Catalog, DatabaseHeader)> {
+    ///
+    /// Returns (catalog, header, was_migrated) where was_migrated is true if the database
+    /// was upgraded from version 1 to version 2.
+    fn load_database(buffer_pool: &BufferPool) -> Result<(Catalog, DatabaseHeader, bool)> {
         use storage::PageId;
 
         // Read header from page 0
         let header_handle = buffer_pool.pin(PageId::new(0, 0))?;
         let header_data = header_handle.data();
-        let header = DatabaseHeader::deserialize(header_data)?;
+        let (header, was_migrated) = DatabaseHeader::deserialize_with_migration_flag(header_data)?;
         header.validate()?;
 
-        if !header.verify_checksum() {
+        // Skip checksum verification for migrated headers since the checksum was computed
+        // for the v1 structure and won't match the v2 structure
+        if !was_migrated && !header.verify_checksum() {
             return Err(RuzuError::ChecksumError(
                 "Database header checksum mismatch".into(),
             ));
@@ -302,7 +351,7 @@ impl Database {
             Catalog::new()
         };
 
-        Ok((catalog, header))
+        Ok((catalog, header, was_migrated))
     }
 
     /// Loads table data from disk.
@@ -353,6 +402,106 @@ impl Database {
         Ok(tables)
     }
 
+    /// Loads relationship table data from the database file on disk.
+    ///
+    /// Reads serialized `HashMap<String, RelTableData>` from page 3 (the relationship
+    /// metadata page) and reconstructs in-memory `RelTable` instances for each
+    /// relationship table defined in the catalog.
+    ///
+    /// # Page Layout
+    ///
+    /// The relationship metadata page uses a length-prefixed format:
+    /// - Bytes `[0..4]`: `u32` LE length of the serialized data
+    /// - Bytes `[4..4+len]`: bincode-serialized `HashMap<String, RelTableData>`
+    ///
+    /// # Behavior
+    ///
+    /// - If `rel_metadata_range.num_pages == 0` (e.g., migrated v1 database with no
+    ///   rel data page allocated), returns empty `RelTable` instances for each schema.
+    /// - If the length prefix is 0, no relationship data was saved; empty tables are created.
+    /// - If deserialization succeeds, `RelTable::from_data()` reconstructs the CSR
+    ///   structures and validates invariants in debug builds.
+    /// - Any relationship schema in the catalog without persisted data gets an empty table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuzuError::RelTableCorrupted`] if the length prefix exceeds the page
+    /// capacity, or [`RuzuError::RelTableLoadError`] if bincode deserialization fails,
+    /// or if persisted data references a relationship table name absent from the catalog.
+    fn load_rel_table_data(
+        buffer_pool: &BufferPool,
+        catalog: &Catalog,
+        header: &DatabaseHeader,
+    ) -> Result<HashMap<String, RelTable>> {
+        use storage::{PageId, RelTableData};
+
+        let mut rel_tables = HashMap::new();
+
+        // T018: Handle empty database case
+        if header.rel_metadata_range.num_pages == 0 {
+            // No relationship metadata page allocated yet - return empty map
+            // Create empty tables for all relationship schemas
+            for rel_name in catalog.rel_table_names() {
+                if let Some(schema) = catalog.get_rel_table(rel_name) {
+                    let rel_table = RelTable::new(schema);
+                    rel_tables.insert(rel_name.to_string(), rel_table);
+                }
+            }
+            return Ok(rel_tables);
+        }
+
+        // Load relationship data from page 3
+        let rel_page_id = PageId::new(0, header.rel_metadata_range.start_page);
+        let rel_handle = buffer_pool.pin(rel_page_id)?;
+        let data = rel_handle.data();
+
+        // T019: Read and validate length prefix
+        let len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+        if len > PAGE_SIZE - 4 {
+            return Err(RuzuError::RelTableCorrupted(format!(
+                "Invalid rel_table metadata length: {} bytes (max {})",
+                len,
+                PAGE_SIZE - 4
+            )));
+        }
+
+        // T020: Deserialize relationship table data
+        if len > 0 {
+            let rel_data_bytes = &data[4..4 + len];
+
+            let rel_data_map: HashMap<String, RelTableData> =
+                bincode::deserialize(rel_data_bytes).map_err(|e| {
+                    RuzuError::RelTableLoadError(format!("Failed to deserialize rel_tables: {}", e))
+                })?;
+
+            // T021: Schema consistency validation & T022: Create RelTable instances
+            for (table_name, rel_data) in rel_data_map {
+                if let Some(schema) = catalog.get_rel_table(&table_name) {
+                    let rel_table = RelTable::from_data(schema, rel_data);
+                    rel_tables.insert(table_name, rel_table);
+                } else {
+                    // Data exists but schema is missing - this is a corruption error
+                    return Err(RuzuError::RelTableCorrupted(format!(
+                        "Rel table '{}' has data but no schema in catalog",
+                        table_name
+                    )));
+                }
+            }
+        }
+
+        // Create empty tables for any relationship schemas not in the loaded data
+        for rel_name in catalog.rel_table_names() {
+            if !rel_tables.contains_key(rel_name) {
+                if let Some(schema) = catalog.get_rel_table(rel_name) {
+                    let rel_table = RelTable::new(schema);
+                    rel_tables.insert(rel_name.to_string(), rel_table);
+                }
+            }
+        }
+
+        Ok(rel_tables)
+    }
+
     /// Saves all data (catalog and table data) to disk.
     fn save_all_data(&self) -> Result<()> {
         use storage::{PageId, TableData};
@@ -401,6 +550,36 @@ impl Database {
             data[4..4 + table_data_len].copy_from_slice(&table_data_bytes);
         }
 
+        // T024: Serialize relationship table data
+        use storage::RelTableData;
+        let mut rel_data_map: HashMap<String, RelTableData> = HashMap::new();
+        for (table_name, rel_table) in &self.rel_tables {
+            rel_data_map.insert(table_name.clone(), rel_table.to_data());
+        }
+
+        let rel_data_bytes = bincode::serialize(&rel_data_map)
+            .map_err(|e| RuzuError::StorageError(format!("Failed to serialize rel_tables: {e}")))?;
+        let rel_data_len = rel_data_bytes.len();
+
+        // T026: Size validation
+        if rel_data_len > PAGE_SIZE - 4 {
+            return Err(RuzuError::StorageError(format!(
+                "Rel table metadata too large: {} bytes (max {})",
+                rel_data_len,
+                PAGE_SIZE - 4
+            )));
+        }
+
+        // T025: Write rel_table data to page 3
+        if header.rel_metadata_range.num_pages > 0 {
+            let rel_page_id = PageId::new(0, header.rel_metadata_range.start_page);
+            let mut rel_handle = buffer_pool.pin(rel_page_id)?;
+
+            let data = rel_handle.data_mut();
+            data[0..4].copy_from_slice(&(rel_data_len as u32).to_le_bytes());
+            data[4..4 + rel_data_len].copy_from_slice(&rel_data_bytes);
+        }
+
         Ok(())
     }
 
@@ -447,14 +626,8 @@ impl Database {
         }
 
         if self.dirty {
-            self.save_catalog()?;
-            self.save_header()?;
-
-            if let Some(ref pool) = self.buffer_pool {
-                pool.flush_all()?;
-            }
-
-            self.dirty = false;
+            // Perform a final checkpoint to save all data and truncate WAL
+            self.checkpoint()?;
         }
 
         Ok(())
@@ -473,8 +646,10 @@ impl Database {
     /// Returns an error if saving catalog, header, or flushing pages fails.
     pub fn checkpoint(&mut self) -> Result<()> {
         if self.buffer_pool.is_some() {
-            // Save catalog and header first
-            self.save_catalog()?;
+            // Save all data (catalog, node tables, and relationship tables)
+            self.save_all_data()?;
+
+            // Save header
             self.save_header()?;
 
             // Flush buffer pool
