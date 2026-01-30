@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::{RuntimeConfig, RuntimeEnv};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionConfig;
 use futures::StreamExt;
@@ -102,15 +102,9 @@ impl QueryExecutor {
             .with_batch_size(config.batch_size);
 
         // Configure runtime environment
-        let runtime_config = if config.memory_limit > 0 {
-            RuntimeConfig::new()
-        } else {
-            RuntimeConfig::new()
-        };
-
-        let runtime_env = Arc::new(RuntimeEnv::new(runtime_config).unwrap_or_else(|_| {
-            RuntimeEnv::new(RuntimeConfig::new()).expect("Failed to create runtime environment")
-        }));
+        let runtime_env = RuntimeEnvBuilder::new()
+            .build_arc()
+            .expect("Failed to create runtime environment");
 
         let session_ctx = SessionContext::new_with_config_rt(session_config, runtime_env);
 
@@ -259,6 +253,15 @@ pub trait PhysicalOperator {
     fn next(&mut self) -> Result<Option<Row>>;
 }
 
+/// Promotes values for cross-type comparison (Int64 vs Float64).
+fn promote_for_comparison(a: Value, b: Value) -> (Value, Value) {
+    match (&a, &b) {
+        (Value::Int64(n), Value::Float64(_)) => (Value::Float64(*n as f64), b),
+        (Value::Float64(_), Value::Int64(n)) => (a, Value::Float64(*n as f64)),
+        _ => (a, b),
+    }
+}
+
 /// Evaluates an expression against a row.
 ///
 /// # Errors
@@ -279,7 +282,12 @@ pub fn evaluate_expression(expr: &Expression, row: &Row) -> Result<bool> {
     let literal_value = match &expr.value {
         Literal::Int64(n) => Value::Int64(*n),
         Literal::String(s) => Value::String(s.clone()),
+        Literal::Float64(f) => Value::Float64(*f),
+        Literal::Bool(b) => Value::Bool(*b),
     };
+
+    // Promote for cross-type comparison (Int64 vs Float64)
+    let (value, literal_value) = promote_for_comparison(value.clone(), literal_value);
 
     // Compare based on the operator
     let cmp = value.compare(&literal_value);

@@ -3,9 +3,9 @@ name = "ruzu"
 version = "0.0.1"
 edition = "2021"
 rust-version = "1.75"
-description = "Rust Graph Database - Phase 0 Proof of Concept"
-license = "Apache-2.0"
-repository = "https://github.com/your-org/ruzu"
+description = "An embeddable graph database with Cypher query support, inspired by KuzuDB"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kk99807/ruzu"
 
 [dependencies]
 pest = "2.7"

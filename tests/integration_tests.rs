@@ -1015,7 +1015,6 @@ mod crash_recovery_tests {
         WalPayload, WalReader, WalRecord, WalRecordType, WalReplayer, WalWriter,
     };
     use ruzu::{Database, DatabaseConfig, Value};
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     // -------------------------------------------------------------------------
@@ -1026,7 +1025,7 @@ mod crash_recovery_tests {
     fn test_crash_recovery_committed_transaction() {
         let temp_dir = TempDir::new().expect("create temp dir");
         let db_path = temp_dir.path().join("test_db");
-        let wal_path = db_path.join("wal.log");
+        let _wal_path = db_path.join("wal.log");
 
         // Create database and add data, simulating a crash before checkpoint
         {
@@ -1628,8 +1627,8 @@ mod crash_recovery_tests {
     #[test]
     fn test_open_v1_database_with_v2_code() {
         use ruzu::storage::{
-            BufferPool, DatabaseHeader, DatabaseHeaderV1, DiskManager, PageId, PageRange,
-            CURRENT_VERSION, MAGIC_BYTES, PAGE_SIZE,
+            BufferPool, DatabaseHeaderV1, DiskManager, PageId, PageRange,
+            MAGIC_BYTES,
         };
         use std::fs;
         use uuid::Uuid;
@@ -3138,16 +3137,11 @@ mod csv_import_tests {
 // =============================================================================
 
 mod memory_constrained_tests {
-    use ruzu::storage::{BufferPool, BufferPoolStats, DiskManager, PageId, PAGE_SIZE};
+    use ruzu::storage::{BufferPool, DiskManager};
     use ruzu::{Database, DatabaseConfig, Value};
     use std::sync::Arc;
     use std::thread;
     use tempfile::TempDir;
-
-    /// Helper to calculate the number of frames for a given buffer size in bytes
-    fn frames_for_bytes(bytes: usize) -> usize {
-        bytes / PAGE_SIZE
-    }
 
     /// Helper to create test database with custom buffer pool size
     fn create_db_with_buffer_size(buffer_size: usize) -> (Database, TempDir) {
@@ -3763,7 +3757,7 @@ mod streaming_import_tests {
         let (path, _temp) = create_test_csv(csv_content);
 
         // Use streaming config with small batch size for testing
-        let streaming_config = StreamingConfig::new()
+        let _streaming_config = StreamingConfig::new()
             .with_batch_size(2)
             .with_streaming_threshold(0); // Always use streaming
 
@@ -4318,5 +4312,348 @@ mod order_limit_tests {
 
         assert_eq!(row0.get("p.age"), Some(&Value::Int64(42)));
         assert_eq!(row1.get("p.age"), Some(&Value::Int64(39)));
+    }
+}
+
+// =============================================================================
+// Type System Extension Integration Tests (Feature 006-add-datatypes)
+// =============================================================================
+
+mod datatype_integration {
+    use ruzu::{Database, DatabaseConfig, Value};
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    // =========================================================================
+    // US1: FLOAT64 end-to-end
+    // =========================================================================
+
+    #[test]
+    fn test_float64_create_table_insert_query() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Sensor(id INT64, reading FLOAT64, PRIMARY KEY(id))").unwrap();
+        db.execute("CREATE (:Sensor {id: 1, reading: 23.5})").unwrap();
+        db.execute("CREATE (:Sensor {id: 2, reading: 18.2})").unwrap();
+        db.execute("CREATE (:Sensor {id: 3, reading: 30.0})").unwrap();
+
+        let result = db.execute("MATCH (s:Sensor) WHERE s.reading > 20.0 RETURN s.id, s.reading ORDER BY s.reading ASC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("s.reading"), Some(&Value::Float64(23.5)));
+        assert_eq!(result.get_row(1).unwrap().get("s.reading"), Some(&Value::Float64(30.0)));
+    }
+
+    #[test]
+    fn test_float64_negative_values() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Account(id INT64, balance FLOAT64, PRIMARY KEY(id))").unwrap();
+        db.execute("CREATE (:Account {id: 1, balance: -100.50})").unwrap();
+        db.execute("CREATE (:Account {id: 2, balance: 200.75})").unwrap();
+
+        let result = db.execute("MATCH (a:Account) WHERE a.balance < 0.0 RETURN a.id").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("a.id"), Some(&Value::Int64(1)));
+    }
+
+    #[test]
+    fn test_float64_csv_import_and_query() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("products.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,price").unwrap();
+        writeln!(f, "Widget,19.99").unwrap();
+        writeln!(f, "Gadget,5.50").unwrap();
+        writeln!(f, "Thingamajig,100.0").unwrap();
+        writeln!(f, "Doohickey,0.99").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Product FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (p:Product) WHERE p.price > 10.0 RETURN p.name ORDER BY p.price ASC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("p.name"), Some(&Value::String("Widget".to_string())));
+        assert_eq!(result.get_row(1).unwrap().get("p.name"), Some(&Value::String("Thingamajig".to_string())));
+    }
+
+    #[test]
+    fn test_float64_int_promotion_in_insert() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        // Insert integer 0 into FLOAT64 column
+        db.execute("CREATE (:Product {name: 'Free', price: 0})").unwrap();
+        // Insert integer 42 into FLOAT64 column
+        db.execute("CREATE (:Product {name: 'Answer', price: 42})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN p.name, p.price ORDER BY p.price ASC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("p.price"), Some(&Value::Float64(0.0)));
+        assert_eq!(result.get_row(1).unwrap().get("p.price"), Some(&Value::Float64(42.0)));
+    }
+
+    #[test]
+    fn test_float64_int_promotion_in_where() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 5.0})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 50.0})").unwrap();
+
+        // Integer literal 10 should be promoted to 10.0 in WHERE clause
+        let result = db.execute("MATCH (p:Product) WHERE p.price > 10 RETURN p.name").unwrap();
+        assert_eq!(result.row_count(), 1);
+        assert_eq!(result.get_row(0).unwrap().get("p.name"), Some(&Value::String("B".to_string())));
+    }
+
+    #[test]
+    fn test_float64_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Sensor(id INT64, temp FLOAT64, PRIMARY KEY(id))").unwrap();
+            db.execute("CREATE (:Sensor {id: 1, temp: 23.456})").unwrap();
+            db.execute("CREATE (:Sensor {id: 2, temp: -5.0})").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (s:Sensor) RETURN s.id, s.temp ORDER BY s.id ASC").unwrap();
+            assert_eq!(result.row_count(), 2);
+            assert_eq!(result.get_row(0).unwrap().get("s.temp"), Some(&Value::Float64(23.456)));
+            assert_eq!(result.get_row(1).unwrap().get("s.temp"), Some(&Value::Float64(-5.0)));
+        }
+    }
+
+    #[test]
+    fn test_float64_aggregates() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Product(name STRING, price FLOAT64, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Product {name: 'A', price: 10.5})").unwrap();
+        db.execute("CREATE (:Product {name: 'B', price: 5.25})").unwrap();
+        db.execute("CREATE (:Product {name: 'C', price: 30.0})").unwrap();
+
+        let result = db.execute("MATCH (p:Product) RETURN MIN(p.price), MAX(p.price), COUNT(p.price)").unwrap();
+        assert_eq!(result.row_count(), 1);
+        let row = result.get_row(0).unwrap();
+        assert_eq!(row.get("MIN(p.price)"), Some(&Value::Float64(5.25)));
+        assert_eq!(row.get("MAX(p.price)"), Some(&Value::Float64(30.0)));
+        assert_eq!(row.get("COUNT(p.price)"), Some(&Value::Int64(3)));
+    }
+
+    // =========================================================================
+    // US2: BOOL end-to-end
+    // =========================================================================
+
+    #[test]
+    fn test_bool_create_table_insert_query() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'DarkMode', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'Animations', enabled: false})").unwrap();
+        db.execute("CREATE (:Feature {name: 'Notifications', enabled: true})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) WHERE f.enabled = true RETURN f.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    #[test]
+    fn test_bool_false_query() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+        db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+        db.execute("CREATE (:Feature {name: 'C', enabled: false})").unwrap();
+
+        let result = db.execute("MATCH (f:Feature) WHERE f.enabled = false RETURN f.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    #[test]
+    fn test_bool_csv_import_and_query() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Setting(name STRING, active BOOL, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("settings.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,active").unwrap();
+        writeln!(f, "DarkMode,true").unwrap();
+        writeln!(f, "Sound,false").unwrap();
+        writeln!(f, "Wifi,TRUE").unwrap();
+        writeln!(f, "Bluetooth,False").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Setting FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (s:Setting) WHERE s.active = true RETURN s.name").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    #[test]
+    fn test_bool_csv_rejects_non_bool() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("features.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "name,enabled").unwrap();
+        writeln!(f, "A,1").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        let result = db.execute(&format!("COPY Feature FROM '{}'", csv_str));
+        assert!(result.is_err(), "Numeric '1' should not be accepted as BOOL");
+    }
+
+    #[test]
+    fn test_bool_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Feature(name STRING, enabled BOOL, PRIMARY KEY(name))").unwrap();
+            db.execute("CREATE (:Feature {name: 'A', enabled: true})").unwrap();
+            db.execute("CREATE (:Feature {name: 'B', enabled: false})").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (f:Feature) WHERE f.enabled = true RETURN f.name").unwrap();
+            assert_eq!(result.row_count(), 1);
+            assert_eq!(result.get_row(0).unwrap().get("f.name"), Some(&Value::String("A".to_string())));
+        }
+    }
+
+    // =========================================================================
+    // US3: Relationship tables with new types
+    // =========================================================================
+
+    #[test]
+    fn test_rel_table_with_float64_bool() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))").unwrap();
+        db.execute("CREATE NODE TABLE Movie(title STRING, PRIMARY KEY(title))").unwrap();
+        db.execute("CREATE REL TABLE Rates(FROM Person TO Movie, score FLOAT64, recommended BOOL)").unwrap();
+
+        db.execute("CREATE (:Person {name: 'Alice'})").unwrap();
+        db.execute("CREATE (:Person {name: 'Bob'})").unwrap();
+        db.execute("CREATE (:Movie {title: 'Inception'})").unwrap();
+        db.execute("CREATE (:Movie {title: 'Matrix'})").unwrap();
+
+        db.execute("MATCH (a:Person {name: 'Alice'}), (m:Movie {title: 'Inception'}) CREATE (a)-[:Rates {score: 9.5, recommended: true}]->(m)").unwrap();
+        db.execute("MATCH (b:Person {name: 'Bob'}), (m:Movie {title: 'Matrix'}) CREATE (b)-[:Rates {score: 7.0, recommended: false}]->(m)").unwrap();
+
+        let result = db.execute("MATCH (p:Person)-[r:Rates]->(m:Movie) RETURN p.name, r.score, r.recommended, m.title").unwrap();
+        assert_eq!(result.row_count(), 2);
+    }
+
+    #[test]
+    fn test_rel_table_with_float64_bool_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Person(name STRING, PRIMARY KEY(name))").unwrap();
+            db.execute("CREATE NODE TABLE Movie(title STRING, PRIMARY KEY(title))").unwrap();
+            db.execute("CREATE REL TABLE Rates(FROM Person TO Movie, score FLOAT64, recommended BOOL)").unwrap();
+            db.execute("CREATE (:Person {name: 'Alice'})").unwrap();
+            db.execute("CREATE (:Movie {title: 'Inception'})").unwrap();
+            db.execute("MATCH (a:Person {name: 'Alice'}), (m:Movie {title: 'Inception'}) CREATE (a)-[:Rates {score: 9.5, recommended: true}]->(m)").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (p:Person)-[r:Rates]->(m:Movie) RETURN p.name, r.score, r.recommended, m.title").unwrap();
+            assert_eq!(result.row_count(), 1);
+            assert_eq!(result.get_row(0).unwrap().get("r.score"), Some(&Value::Float64(9.5)));
+            assert_eq!(result.get_row(0).unwrap().get("r.recommended"), Some(&Value::Bool(true)));
+        }
+    }
+
+    // =========================================================================
+    // US4: Mixed-type queries
+    // =========================================================================
+
+    #[test]
+    fn test_mixed_type_table_full_workflow() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Item(id INT64, name STRING, price FLOAT64, inStock BOOL, PRIMARY KEY(id))").unwrap();
+
+        // Insert
+        db.execute("CREATE (:Item {id: 1, name: 'Widget', price: 19.99, inStock: true})").unwrap();
+        db.execute("CREATE (:Item {id: 2, name: 'Gadget', price: 49.99, inStock: false})").unwrap();
+        db.execute("CREATE (:Item {id: 3, name: 'Doohickey', price: 5.50, inStock: true})").unwrap();
+
+        // Query with bool filter
+        let result = db.execute("MATCH (i:Item) WHERE i.inStock = true RETURN i.name, i.price ORDER BY i.price ASC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("i.name"), Some(&Value::String("Doohickey".to_string())));
+        assert_eq!(result.get_row(1).unwrap().get("i.name"), Some(&Value::String("Widget".to_string())));
+
+        // Query with float filter (include price in RETURN since ORDER BY needs it)
+        let result = db.execute("MATCH (i:Item) WHERE i.price > 10.0 RETURN i.name, i.price ORDER BY i.price DESC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("i.name"), Some(&Value::String("Gadget".to_string())));
+        assert_eq!(result.get_row(1).unwrap().get("i.name"), Some(&Value::String("Widget".to_string())));
+    }
+
+    #[test]
+    fn test_mixed_type_csv_import() {
+        let mut db = Database::new();
+        db.execute("CREATE NODE TABLE Item(id INT64, name STRING, price FLOAT64, inStock BOOL, PRIMARY KEY(id))").unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let csv_path = temp_dir.path().join("items.csv");
+        let mut f = std::fs::File::create(&csv_path).unwrap();
+        writeln!(f, "id,name,price,inStock").unwrap();
+        writeln!(f, "1,Widget,19.99,true").unwrap();
+        writeln!(f, "2,Gadget,49.99,false").unwrap();
+        writeln!(f, "3,Doohickey,5.50,true").unwrap();
+        drop(f);
+
+        let csv_str = csv_path.to_str().unwrap().replace('\\', "/");
+        db.execute(&format!("COPY Item FROM '{}'", csv_str)).unwrap();
+
+        let result = db.execute("MATCH (i:Item) WHERE i.inStock = true RETURN i.name, i.price ORDER BY i.price ASC").unwrap();
+        assert_eq!(result.row_count(), 2);
+        assert_eq!(result.get_row(0).unwrap().get("i.name"), Some(&Value::String("Doohickey".to_string())));
+    }
+
+    #[test]
+    fn test_mixed_type_persistence() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute("CREATE NODE TABLE Item(id INT64, name STRING, price FLOAT64, inStock BOOL, PRIMARY KEY(id))").unwrap();
+            db.execute("CREATE (:Item {id: 1, name: 'Widget', price: 19.99, inStock: true})").unwrap();
+            db.execute("CREATE (:Item {id: 2, name: 'Gadget', price: 49.99, inStock: false})").unwrap();
+            db.close().unwrap();
+        }
+
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db.execute("MATCH (i:Item) RETURN i.id, i.name, i.price, i.inStock ORDER BY i.id ASC").unwrap();
+            assert_eq!(result.row_count(), 2);
+            let row0 = result.get_row(0).unwrap();
+            assert_eq!(row0.get("i.id"), Some(&Value::Int64(1)));
+            assert_eq!(row0.get("i.name"), Some(&Value::String("Widget".to_string())));
+            assert_eq!(row0.get("i.price"), Some(&Value::Float64(19.99)));
+            assert_eq!(row0.get("i.inStock"), Some(&Value::Bool(true)));
+
+            let row1 = result.get_row(1).unwrap();
+            assert_eq!(row1.get("i.inStock"), Some(&Value::Bool(false)));
+        }
     }
 }

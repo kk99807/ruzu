@@ -1,7 +1,5 @@
 //! Bound expression definitions.
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 
 use crate::types::{DataType, Value};

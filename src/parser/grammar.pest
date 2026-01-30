@@ -36,7 +36,7 @@ rel_property_list = {
 
 column_list = { column_def ~ ("," ~ column_def)* }
 column_def = { identifier ~ data_type }
-data_type = { ^"STRING" | ^"INT64" }
+data_type = { ^"STRING" | ^"INT64" | ^"FLOAT64" | ^"BOOL" }
 primary_key_clause = { ^"PRIMARY" ~ ^"KEY" ~ "(" ~ identifier_list ~ ")" }
 
 // DML: CREATE node
@@ -158,8 +158,9 @@ comparison = { projection ~ comparison_op ~ literal }
 comparison_op = { ">=" | "<=" | "<>" | ">" | "<" | "=" }
 
 // Literals
-literal = { string_literal | integer_literal }
+literal = { float_literal | bool_literal | string_literal | integer_literal }
 string_literal = @{ "'" ~ (!"'" ~ ANY)* ~ "'" }
+float_literal = @{ "-"? ~ ASCII_DIGIT* ~ "." ~ ASCII_DIGIT+ }
 integer_literal = @{ "-"? ~ ASCII_DIGIT+ }
 
 // Identifiers

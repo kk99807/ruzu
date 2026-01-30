@@ -65,7 +65,5 @@ impl OptimizerRule for FilterPushdownRule {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Tests will be added when the full binder/expression system is complete
 }

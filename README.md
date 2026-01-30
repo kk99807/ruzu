@@ -1,70 +1,113 @@
 # ruzu
 
-**ruzu** (Rust + Kuzu) is a pure Rust port of [KuzuDB](https://github.com/kuzudb/kuzu), an embeddable graph database optimized for query speed and scalability.
+**ruzu** is an embeddable graph database written in pure Rust, inspired by [KuzuDB](https://github.com/kuzudb/kuzu). It uses a subset of the Cypher query language and targets use cases where you want a lightweight, embedded graph database with no separate server process.
 
-## Project Status
+> **v0.0.1 — Early Development.** This is a working database with persistence, crash recovery, and a real query engine, but it is not yet production-ready. See [Current Limitations](#current-limitations) below.
 
-🚧 **Active Development** - Phase 1 (Persistent Storage) is complete. Working toward MVP.
+## Quick Start
 
-## Motivation
+Add to your `Cargo.toml`:
 
-KuzuDB is a high-performance, embeddable graph database written in C++ that excels at:
-- Blazing fast query performance
-- Storage efficiency with columnar compression
-- Embedded architecture (no separate server process)
+```toml
+[dependencies]
+ruzu = "0.0.1"
+```
 
-However, KuzuDB development has been discontinued and the current codebase does not compile on Windows. This Rust port aims to:
+```rust
+use ruzu::Database;
 
-1. **Preserve the excellent design** - Port the core architecture and algorithms from the C++ implementation
-2. **Improve safety** - Leverage Rust's memory safety guarantees to eliminate entire classes of bugs
-3. **Enable integration** - Provide seamless integration with Rust-based data processing toolkits
-4. **Add concurrency** - Extend beyond the single-writer model with Rust's fearless concurrency
-5. **Ensure longevity** - Maintain and evolve the codebase as an active open-source project
+let db = Database::open("my_graph.db").unwrap();
+
+db.execute("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))").unwrap();
+db.execute("CREATE (:Person {name: 'Alice', age: 30})").unwrap();
+db.execute("CREATE (:Person {name: 'Bob', age: 25})").unwrap();
+
+let results = db.execute("MATCH (p:Person) WHERE p.age > 20 RETURN p.name, p.age").unwrap();
+```
+
+## Features
+
+- **Embedded** — No server, no network. Open a file and query it.
+- **Persistent** — 4KB page-based storage with write-ahead logging and crash recovery.
+- **Cypher queries** — Supports a subset of Cypher (see [Supported Cypher](#supported-cypher) below).
+- **Relationships** — CSR (Compressed Sparse Row) edge storage with bidirectional traversal.
+- **Bulk import** — `COPY FROM` CSV with parallel parsing via rayon.
+- **Buffer pool** — LRU page eviction for memory-constrained operation.
+
+## Supported Data Types
+
+| Type | Description | Parser support |
+|------|-------------|----------------|
+| `INT64` | 64-bit signed integer | Yes |
+| `FLOAT64` | 64-bit floating point | Yes |
+| `BOOL` | Boolean | Yes |
+| `STRING` | UTF-8 string | Yes |
+| `Date` | Days since Unix epoch | Code only* |
+| `Timestamp` | Microseconds since Unix epoch | Code only* |
+| `Float32` | 32-bit floating point | Code only* |
+
+\* These types exist in the type system but cannot yet be used in `CREATE NODE TABLE` DDL statements.
+
+## Supported Cypher
+
+**DDL:**
+- `CREATE NODE TABLE Name(col1 TYPE, col2 TYPE, PRIMARY KEY(col1))`
+- `CREATE REL TABLE Name(FROM Table1 TO Table2, prop1 TYPE, ...)`
+
+**DML:**
+- `CREATE (:Label {prop: value, ...})`
+- `MATCH (n:Label) RETURN n.prop` with optional `WHERE`, `ORDER BY`, `SKIP`, `LIMIT`
+- `MATCH (a:Label)-[:REL]->(b:Label) RETURN a.prop, b.prop`
+- `MATCH (a)-[r:REL*min..max]->(b) RETURN ...` (variable-length paths)
+- `MATCH (a:Label), (b:Label) CREATE (a)-[:REL {props}]->(b)`
+- Aggregates: `COUNT(*)`, `COUNT(expr)`, `SUM`, `AVG`, `MIN`, `MAX`
+- `EXPLAIN` prefix for query plans
+
+**Bulk import:**
+- `COPY table FROM 'file.csv'` with options: `HEADER`, `DELIM`, `SKIP`, `IGNORE_ERRORS`
+
+**Not yet supported:** `SET`, `DELETE`, `MERGE`, `WITH`, `OPTIONAL MATCH`, `UNWIND`, subqueries, list/map types, path functions, string functions.
+
+## Current Limitations
+
+1. **Single-page storage.** All data for a table currently lives in a single page rather than the file-per-column layout that KuzuDB uses for performant multi-hop traversals. Near-term plan is multi-page storage, followed by refactoring toward a columnar-file architecture.
+
+2. **Limited data types.** Only 4 types (`INT64`, `FLOAT64`, `BOOL`, `STRING`) are usable end-to-end in DDL. `Date`, `Timestamp`, and `Float32` exist in the type system but are not yet wired into the parser.
+
+3. **Cypher subset.** The query language covers basic MATCH/RETURN with filtering, ordering, aggregation, and variable-length paths, but does not yet support mutations (`SET`/`DELETE`), `WITH` chaining, `OPTIONAL MATCH`, or most Cypher functions. Near-term plans include expanding MATCH capabilities, adding `EXISTS`/`NOT EXISTS`, and multi-hop chained MATCH patterns.
+
+4. **Single-writer.** No concurrent transactions. One writer at a time.
+
+5. **No indexes.** Queries use full scans. No B-tree or hash indexes yet.
 
 ## Roadmap
 
-### Phase 0: Proof of Concept ✅
-- [x] Basic Cypher parser (CREATE NODE TABLE, CREATE node, MATCH with WHERE/RETURN)
-- [x] In-memory columnar storage
-- [x] Simple query execution
-- [x] Establish baseline benchmarks
+### Phase 0: Proof of Concept — Done
+- Basic Cypher parser, in-memory columnar storage, simple query execution
 
-### Phase 1: Persistent Storage ✅
-- [x] Disk-based storage with buffer pool management
-- [x] Write-Ahead Logging (WAL) with crash recovery
-- [x] Catalog and data persistence
-- [x] Relationship/edge support (CSR format)
-- [x] Bulk CSV import (COPY FROM)
+### Phase 1: Persistent Storage — Done
+- Disk-based storage with buffer pool, WAL with crash recovery, relationship/edge support (CSR), bulk CSV import
 
-### Phase 2: Query Engine
-- [ ] Full query pipeline with Apache DataFusion integration
-- [ ] Graph-specific operators (path expansion, relationship traversal)
-- [ ] Query optimization
+### Phase 2: Storage & Query Language — In Progress
+- Columnar-file storage (file-per-column, matching KuzuDB architecture)
+- Full Cypher support
+- Apache DataFusion integration, graph-specific operators, query optimization
 
 ### Phase 3: Transactions & MVP
-- [ ] MVCC transaction management
-- [ ] Checkpointing
-- [ ] Performance tuning (target: 2x slower than C++ KuzuDB)
-- [ ] Production-ready v0.1.0
+- MVCC, checkpointing, performance tuning, production-ready v0.1.0
 
-### Phase 4+: Future Enhancements
-- Concurrent write transactions (multi-writer MVCC)
-- Advanced compression algorithms
-- Full Cypher support
-- Parquet import/export
-- Performance parity with C++ (0.8-1.2x)
+### Phase 4+: Future
+- Multi-writer MVCC, advanced compression, Parquet import/export
 
-## Reference Implementation
+## Reference
 
-The original C++ KuzuDB codebase serves as our authoritative reference:
-- **Repository**: https://github.com/kuzudb/kuzu
-- **Documentation**: https://docs.kuzudb.com/
+Inspired by [KuzuDB](https://github.com/kuzudb/kuzu) ([docs](https://docs.kuzudb.com/)).
 
 ## Benchmarks
 
 Benchmarks run on Windows x86_64, Rust 1.75+ (release mode).
 
-### CSV Bulk Import Performance (Optimized - v0.0.2)
+### CSV Bulk Import Performance (Optimized - v0.0.1)
 
 With parallel parsing and memory-mapped I/O enabled:
 

@@ -98,6 +98,7 @@ impl MmapReader {
     }
 
     /// Attempts to memory-map the file.
+    #[allow(unsafe_code)]
     fn try_mmap(file: &File, size: u64) -> Result<Self, RuzuError> {
         // SAFETY: File is opened read-only. We assume no concurrent writes
         // to the file during the import operation. If the file is modified

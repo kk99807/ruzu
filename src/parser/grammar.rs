@@ -767,6 +767,25 @@ fn build_literal(pair: pest::iterators::Pair<Rule>) -> Result<Literal> {
                 })?;
                 return Ok(Literal::Int64(n));
             }
+            Rule::float_literal => {
+                let f: f64 = inner.as_str().parse().map_err(|_| RuzuError::ParseError {
+                    line: 0,
+                    col: 0,
+                    message: format!("Invalid float: {}", inner.as_str()),
+                })?;
+                if !f.is_finite() {
+                    return Err(RuzuError::ParseError {
+                        line: 0,
+                        col: 0,
+                        message: format!("Invalid FLOAT64 value: {} (NaN and Infinity are not allowed)", inner.as_str()),
+                    });
+                }
+                return Ok(Literal::Float64(f));
+            }
+            Rule::bool_literal => {
+                let b = inner.as_str().eq_ignore_ascii_case("true");
+                return Ok(Literal::Bool(b));
+            }
             _ => {}
         }
     }

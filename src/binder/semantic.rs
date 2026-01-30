@@ -1,14 +1,12 @@
 //! Semantic analysis and binding.
 
-use std::sync::Arc;
-
 use crate::catalog::Catalog;
 use crate::error::{Result, RuzuError};
 use crate::types::DataType;
 
-use super::expression::{AggregateFunction, BoundExpression, ComparisonOp};
+use super::expression::BoundExpression;
 use super::query_graph::{BoundNode, BoundRelationship, Direction, QueryGraph};
-use super::scope::{BinderScope, BoundVariable, VariableType};
+use super::scope::{BinderScope, BoundVariable};
 
 /// Errors that can occur during binding.
 #[derive(Debug, Clone)]

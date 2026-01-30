@@ -115,6 +115,10 @@ pub enum Literal {
     String(String),
     /// 64-bit integer literal.
     Int64(i64),
+    /// 64-bit floating-point literal.
+    Float64(f64),
+    /// Boolean literal.
+    Bool(bool),
 }
 
 /// Return item in RETURN clause.

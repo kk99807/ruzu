@@ -14,13 +14,13 @@ pub use optimizer::{
 };
 pub use physical_plan::PlanMapper;
 
-use crate::binder::{BoundExpression, BoundQuery, QueryGraph};
+use crate::binder::{BoundQuery, QueryGraph};
 use crate::catalog::Catalog;
 use crate::error::{Result, RuzuError};
 
 /// Query planner.
 pub struct Planner<'a> {
-    catalog: &'a Catalog,
+    _catalog: &'a Catalog,
     optimizer_rules: Vec<Box<dyn OptimizerRule>>,
 }
 
@@ -36,7 +36,7 @@ impl<'a> Planner<'a> {
         ];
 
         Planner {
-            catalog,
+            _catalog: catalog,
             optimizer_rules,
         }
     }
@@ -45,7 +45,7 @@ impl<'a> Planner<'a> {
     #[must_use]
     pub fn without_optimization(catalog: &'a Catalog) -> Self {
         Planner {
-            catalog,
+            _catalog: catalog,
             optimizer_rules: Vec::new(),
         }
     }
