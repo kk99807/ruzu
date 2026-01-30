@@ -81,6 +81,14 @@ pub enum RuzuError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// Relationship table load error.
+    #[error("Relationship table load error: {0}")]
+    RelTableLoadError(String),
+
+    /// Relationship table corrupted error.
+    #[error("Relationship table corrupted: {0}")]
+    RelTableCorrupted(String),
+
     // ==================== Query Engine Errors (Phase 2) ====================
     /// Binding error (semantic analysis).
     #[error("Bind error: {0}")]

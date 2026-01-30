@@ -181,6 +181,9 @@ impl WalWriter {
     ///
     /// Returns an error if truncation fails.
     pub fn truncate(&mut self) -> Result<()> {
+        // Flush any buffered writes before truncating
+        self.flush()?;
+
         let header_size = WalHeader::serialized_size() as u64;
 
         self.writer

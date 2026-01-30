@@ -79,6 +79,10 @@ harness = false
 name = "query_benchmark"
 harness = false
 
+[[bench]]
+name = "rel_persist_benchmark"
+harness = false
+
 [[bin]]
 name = "memory_profile"
 path = "src/bin/memory_profile.rs"

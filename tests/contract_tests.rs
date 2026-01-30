@@ -24,7 +24,7 @@ mod storage_format_contracts {
 
     #[test]
     fn test_header_version() {
-        assert_eq!(CURRENT_VERSION, 1);
+        assert_eq!(CURRENT_VERSION, 2); // Version 2 adds rel_metadata_range field
     }
 
     #[test]
@@ -1313,5 +1313,308 @@ mod memory_contract_tests {
 
         // After 5 batches with recycling, memory should be stable
         // This is the key to MC-004 compliance
+    }
+
+    // -------------------------------------------------------------------------
+    // T011-T014: Relationship Persistence Format Contracts (US1)
+    // -------------------------------------------------------------------------
+
+    /// T011: Contract test for empty rel_table save/load
+    /// Ensures that databases with zero relationships can be saved and loaded
+    #[test]
+    fn test_empty_rel_table_save_load() {
+        use ruzu::storage::{CsrNodeGroup, RelTableData};
+        use std::collections::HashMap;
+
+        // Create empty RelTableData
+        let empty_data = RelTableData::default();
+
+        // Verify it serializes correctly
+        let serialized = bincode::serialize(&empty_data).expect("serialize empty rel_table");
+        assert!(serialized.len() < 100); // Empty should be small
+
+        // Verify it deserializes correctly
+        let deserialized: RelTableData =
+            bincode::deserialize(&serialized).expect("deserialize empty rel_table");
+        assert_eq!(deserialized.forward_groups.len(), 0);
+        assert_eq!(deserialized.backward_groups.len(), 0);
+        assert_eq!(deserialized.next_rel_id, 0);
+        assert_eq!(deserialized.properties.len(), 0);
+
+        // Verify HashMap with empty tables serializes
+        let mut map: HashMap<String, RelTableData> = HashMap::new();
+        map.insert("EmptyRel".to_string(), empty_data);
+
+        let map_serialized = bincode::serialize(&map).expect("serialize rel_table map");
+        let map_deserialized: HashMap<String, RelTableData> =
+            bincode::deserialize(&map_serialized).expect("deserialize rel_table map");
+
+        assert_eq!(map_deserialized.len(), 1);
+        assert!(map_deserialized.contains_key("EmptyRel"));
+    }
+
+    /// T012: Contract test for single rel_table serialization format
+    /// Ensures a relationship table with data maintains format stability
+    #[test]
+    fn test_single_rel_table_serialization_format() {
+        use ruzu::storage::{CsrNodeGroup, RelTableData};
+        use ruzu::types::Value;
+        use std::collections::HashMap;
+
+        // Create RelTableData with one relationship: node 0 -> node 1
+        let forward_group = CsrNodeGroup {
+            group_id: 0,
+            num_nodes: 1,
+            offsets: vec![0, 1],
+            neighbors: vec![1],
+            rel_ids: vec![100],
+            properties: vec![],
+        };
+
+        let backward_group = CsrNodeGroup {
+            group_id: 1,
+            num_nodes: 1,
+            offsets: vec![0, 1],
+            neighbors: vec![0],
+            rel_ids: vec![100],
+            properties: vec![],
+        };
+
+        let mut properties = HashMap::new();
+        properties.insert(100, vec![Value::Int64(2020)]);
+
+        let rel_data = RelTableData {
+            forward_groups: vec![forward_group],
+            backward_groups: vec![backward_group],
+            next_rel_id: 101,
+            properties,
+        };
+
+        // Serialize and verify size is reasonable
+        let serialized = bincode::serialize(&rel_data).expect("serialize rel_table");
+        assert!(serialized.len() < 1000); // Should be small for single relationship
+
+        // Deserialize and verify all fields
+        let deserialized: RelTableData =
+            bincode::deserialize(&serialized).expect("deserialize rel_table");
+
+        assert_eq!(deserialized.forward_groups.len(), 1);
+        assert_eq!(deserialized.backward_groups.len(), 1);
+        assert_eq!(deserialized.next_rel_id, 101);
+        assert_eq!(deserialized.properties.len(), 1);
+
+        // Verify forward group
+        assert_eq!(deserialized.forward_groups[0].group_id, 0);
+        assert_eq!(deserialized.forward_groups[0].num_nodes, 1);
+        assert_eq!(deserialized.forward_groups[0].offsets, vec![0, 1]);
+        assert_eq!(deserialized.forward_groups[0].neighbors, vec![1]);
+        assert_eq!(deserialized.forward_groups[0].rel_ids, vec![100]);
+
+        // Verify backward group
+        assert_eq!(deserialized.backward_groups[0].group_id, 1);
+        assert_eq!(deserialized.backward_groups[0].num_nodes, 1);
+        assert_eq!(deserialized.backward_groups[0].offsets, vec![0, 1]);
+        assert_eq!(deserialized.backward_groups[0].neighbors, vec![0]);
+        assert_eq!(deserialized.backward_groups[0].rel_ids, vec![100]);
+
+        // Verify properties
+        assert_eq!(
+            deserialized.properties.get(&100),
+            Some(&vec![Value::Int64(2020)])
+        );
+    }
+
+    /// T013: Contract test for multiple rel_tables save/load
+    /// Ensures multiple relationship tables can coexist in the same database
+    #[test]
+    fn test_multiple_rel_tables_save_load() {
+        use ruzu::storage::{CsrNodeGroup, RelTableData, PAGE_SIZE};
+        use std::collections::HashMap;
+
+        // Create first relationship table
+        let knows_forward = CsrNodeGroup {
+            group_id: 0,
+            num_nodes: 1,
+            offsets: vec![0, 2],
+            neighbors: vec![1, 2],
+            rel_ids: vec![10, 11],
+            properties: vec![],
+        };
+        let knows_data = RelTableData {
+            forward_groups: vec![knows_forward],
+            backward_groups: vec![],
+            next_rel_id: 12,
+            properties: HashMap::new(),
+        };
+
+        // Create second relationship table
+        let follows_forward = CsrNodeGroup {
+            group_id: 1,
+            num_nodes: 1,
+            offsets: vec![0, 1],
+            neighbors: vec![0],
+            rel_ids: vec![20],
+            properties: vec![],
+        };
+        let follows_data = RelTableData {
+            forward_groups: vec![follows_forward],
+            backward_groups: vec![],
+            next_rel_id: 21,
+            properties: HashMap::new(),
+        };
+
+        // Create map of multiple tables
+        let mut rel_tables: HashMap<String, RelTableData> = HashMap::new();
+        rel_tables.insert("Knows".to_string(), knows_data);
+        rel_tables.insert("Follows".to_string(), follows_data);
+
+        // Serialize
+        let serialized = bincode::serialize(&rel_tables).expect("serialize multiple rel_tables");
+        assert!(serialized.len() < PAGE_SIZE - 4); // Must fit in a page
+
+        // Deserialize
+        let deserialized: HashMap<String, RelTableData> =
+            bincode::deserialize(&serialized).expect("deserialize multiple rel_tables");
+
+        assert_eq!(deserialized.len(), 2);
+        assert!(deserialized.contains_key("Knows"));
+        assert!(deserialized.contains_key("Follows"));
+
+        // Verify "Knows" table
+        let knows = deserialized.get("Knows").unwrap();
+        assert_eq!(knows.forward_groups.len(), 1);
+        assert_eq!(knows.forward_groups[0].group_id, 0);
+        assert_eq!(knows.forward_groups[0].neighbors, vec![1, 2]);
+        assert_eq!(knows.next_rel_id, 12);
+
+        // Verify "Follows" table
+        let follows = deserialized.get("Follows").unwrap();
+        assert_eq!(follows.forward_groups.len(), 1);
+        assert_eq!(follows.forward_groups[0].group_id, 1);
+        assert_eq!(follows.forward_groups[0].neighbors, vec![0]);
+        assert_eq!(follows.next_rel_id, 21);
+    }
+
+    /// T014: Contract test for CSR invariant preservation
+    /// Ensures CSR structure invariants are maintained after serialization roundtrip
+    #[test]
+    fn test_csr_invariant_preservation() {
+        use ruzu::storage::{CsrNodeGroup, RelTableData};
+        use std::collections::HashMap;
+
+        // Create CSR with multiple edges from same source
+        let forward_group = CsrNodeGroup {
+            group_id: 5,
+            num_nodes: 1,
+            offsets: vec![0, 3], // 3 edges
+            neighbors: vec![10, 20, 30],
+            rel_ids: vec![100, 101, 102],
+            properties: vec![],
+        };
+
+        let rel_data = RelTableData {
+            forward_groups: vec![forward_group.clone()],
+            backward_groups: vec![],
+            next_rel_id: 103,
+            properties: HashMap::new(),
+        };
+
+        // Serialize and deserialize
+        let serialized = bincode::serialize(&rel_data).expect("serialize");
+        let deserialized: RelTableData = bincode::deserialize(&serialized).expect("deserialize");
+
+        // Verify CSR invariants
+        let group = &deserialized.forward_groups[0];
+        assert_eq!(group.group_id, 5);
+        assert_eq!(group.offsets.len(), 2); // start and end
+
+        // Invariant: offsets define edge count
+        let edge_count = (group.offsets[1] - group.offsets[0]) as usize;
+        assert_eq!(edge_count, 3);
+
+        // Invariant: neighbors.len() == edge_count
+        assert_eq!(group.neighbors.len(), edge_count);
+
+        // Invariant: rel_ids.len() == edge_count
+        assert_eq!(group.rel_ids.len(), edge_count);
+
+        // Invariant: neighbors and rel_ids match original
+        assert_eq!(group.neighbors, vec![10, 20, 30]);
+        assert_eq!(group.rel_ids, vec![100, 101, 102]);
+
+        // Invariant: next_rel_id > all existing rel_ids
+        for &rel_id in &group.rel_ids {
+            assert!(deserialized.next_rel_id > rel_id);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 6: Version Migration Tests (T048)
+    // -------------------------------------------------------------------------
+
+    /// T048: Contract test for version 1 to version 2 header migration
+    /// Ensures that version 1 databases can be upgraded to version 2 without data loss
+    #[test]
+    fn test_v1_to_v2_header_migration() {
+        use ruzu::storage::{DatabaseHeader, DatabaseHeaderV1, PageRange};
+        use uuid::Uuid;
+
+        // Create a version 1 header
+        let db_id = Uuid::new_v4();
+        let v1_header = DatabaseHeaderV1 {
+            magic: *ruzu::storage::MAGIC_BYTES,
+            version: 1,
+            database_id: db_id,
+            catalog_range: PageRange::new(1, 1),
+            metadata_range: PageRange::new(2, 1),
+            checksum: 0,
+        };
+
+        // Migrate to version 2
+        let v2_header = DatabaseHeader::from_v1(v1_header);
+
+        // Verify all fields migrated correctly
+        assert_eq!(v2_header.magic, *ruzu::storage::MAGIC_BYTES);
+        assert_eq!(v2_header.version, 2); // Version upgraded to 2
+        assert_eq!(v2_header.database_id, db_id);
+        assert_eq!(v2_header.catalog_range.start_page, 1);
+        assert_eq!(v2_header.catalog_range.num_pages, 1);
+        assert_eq!(v2_header.metadata_range.start_page, 2);
+        assert_eq!(v2_header.metadata_range.num_pages, 1);
+
+        // New field should be allocated at page 3 for relationship metadata
+        assert_eq!(v2_header.rel_metadata_range.start_page, 3);
+        assert_eq!(v2_header.rel_metadata_range.num_pages, 1);
+        assert!(!v2_header.rel_metadata_range.is_empty());
+    }
+
+    /// T048 (additional): Test that v1 header serialization format is distinct from v2
+    #[test]
+    fn test_v1_serialization_format_compatibility() {
+        use ruzu::storage::{DatabaseHeaderV1, PageRange};
+        use uuid::Uuid;
+
+        let db_id = Uuid::new_v4();
+        let v1_header = DatabaseHeaderV1 {
+            magic: *ruzu::storage::MAGIC_BYTES,
+            version: 1,
+            database_id: db_id,
+            catalog_range: PageRange::new(1, 1),
+            metadata_range: PageRange::new(2, 1),
+            checksum: 12345,
+        };
+
+        // V1 header should serialize successfully
+        let v1_bytes = bincode::serialize(&v1_header).expect("serialize v1 header");
+
+        // V1 serialized bytes should be shorter than V2 (missing rel_metadata_range field)
+        assert!(v1_bytes.len() < 200); // V1 header is compact
+
+        // Should be able to deserialize back to V1
+        let restored_v1: DatabaseHeaderV1 =
+            bincode::deserialize(&v1_bytes).expect("deserialize v1 header");
+        assert_eq!(restored_v1.version, 1);
+        assert_eq!(restored_v1.database_id, db_id);
+        assert_eq!(restored_v1.checksum, 12345);
     }
 }

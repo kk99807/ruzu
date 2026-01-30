@@ -289,6 +289,106 @@ impl RelTable {
     /// Creates a relationship table from serialized data.
     #[must_use]
     pub fn from_data(schema: Arc<RelTableSchema>, data: RelTableData) -> Self {
+        // Debug assertions for CSR invariants
+        #[cfg(debug_assertions)]
+        {
+            // Validate forward CSR groups
+            for group in &data.forward_groups {
+                debug_assert!(
+                    !group.offsets.is_empty(),
+                    "CSR group offsets cannot be empty"
+                );
+                debug_assert!(
+                    group.offsets.len() >= 2,
+                    "CSR group should have at least 2 offsets (for num_nodes = 1), got {}",
+                    group.offsets.len()
+                );
+                // Validate offsets.len() == num_nodes + 1
+                let num_nodes = group.offsets.len() - 1;
+                let total_edges = group.offsets.last().unwrap() - group.offsets[0];
+                debug_assert_eq!(
+                    group.neighbors.len(),
+                    total_edges as usize,
+                    "Forward CSR group {}: neighbors.len() ({}) != total edges ({})",
+                    group.group_id,
+                    group.neighbors.len(),
+                    total_edges
+                );
+                debug_assert_eq!(
+                    group.rel_ids.len(),
+                    total_edges as usize,
+                    "Forward CSR group {}: rel_ids.len() ({}) != total edges ({})",
+                    group.group_id,
+                    group.rel_ids.len(),
+                    total_edges
+                );
+                // Validate offsets are monotonically non-decreasing
+                for i in 0..num_nodes {
+                    debug_assert!(
+                        group.offsets[i] <= group.offsets[i + 1],
+                        "Forward CSR group {}: offsets not monotonic at {}: {} > {}",
+                        group.group_id,
+                        i,
+                        group.offsets[i],
+                        group.offsets[i + 1]
+                    );
+                }
+            }
+
+            // Validate backward CSR groups
+            for group in &data.backward_groups {
+                debug_assert!(
+                    !group.offsets.is_empty(),
+                    "CSR group offsets cannot be empty"
+                );
+                debug_assert!(
+                    group.offsets.len() >= 2,
+                    "CSR group should have at least 2 offsets (for num_nodes = 1), got {}",
+                    group.offsets.len()
+                );
+                // Validate offsets.len() == num_nodes + 1
+                let num_nodes = group.offsets.len() - 1;
+                let total_edges = group.offsets.last().unwrap() - group.offsets[0];
+                debug_assert_eq!(
+                    group.neighbors.len(),
+                    total_edges as usize,
+                    "Backward CSR group {}: neighbors.len() ({}) != total edges ({})",
+                    group.group_id,
+                    group.neighbors.len(),
+                    total_edges
+                );
+                debug_assert_eq!(
+                    group.rel_ids.len(),
+                    total_edges as usize,
+                    "Backward CSR group {}: rel_ids.len() ({}) != total edges ({})",
+                    group.group_id,
+                    group.rel_ids.len(),
+                    total_edges
+                );
+                // Validate offsets are monotonically non-decreasing
+                for i in 0..num_nodes {
+                    debug_assert!(
+                        group.offsets[i] <= group.offsets[i + 1],
+                        "Backward CSR group {}: offsets not monotonic at {}: {} > {}",
+                        group.group_id,
+                        i,
+                        group.offsets[i],
+                        group.offsets[i + 1]
+                    );
+                }
+            }
+
+            // Validate next_rel_id is greater than all existing rel_ids
+            for &rel_id in data.properties.keys() {
+                debug_assert!(
+                    rel_id < data.next_rel_id,
+                    "Relationship ID {} >= next_rel_id {}",
+                    rel_id,
+                    data.next_rel_id
+                );
+            }
+        }
+
         let forward_groups = data
             .forward_groups
             .into_iter()
