@@ -6,6 +6,15 @@ rust-version = "1.75"
 description = "An embeddable graph database with Cypher query support, inspired by KuzuDB"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/kk99807/ruzu"
+exclude = [
+    ".claude/",
+    ".specify/",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "specs/",
+    "docs/",
+    "benches/",
+]
 
 [dependencies]
 pest = "2.7"
