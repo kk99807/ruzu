@@ -837,7 +837,7 @@ impl Database {
             } => self.execute_create_node_table(table_name, columns, primary_key),
 
             Statement::CreateNode { label, properties } => {
-                self.execute_create_node(&label, properties)
+                self.execute_create_node(&label, &properties)
             }
 
             Statement::Match {
@@ -848,7 +848,7 @@ impl Database {
                 order_by,
                 skip,
                 limit,
-            } => self.execute_match(var, &label, filter, &projections, order_by, skip, limit),
+            } => self.execute_match(&var, &label, filter, &projections, order_by.as_ref(), skip, limit),
 
             Statement::CreateRelTable {
                 table_name,
@@ -865,7 +865,7 @@ impl Database {
                 src_var,
                 dst_var,
             } => {
-                self.execute_match_create(src_node, dst_node, rel_type, rel_props, src_var, dst_var)
+                self.execute_match_create(&src_node, &dst_node, &rel_type, rel_props, src_var, dst_var)
             }
 
             Statement::MatchRel {
@@ -879,13 +879,13 @@ impl Database {
                 skip,
                 limit,
                 path_bounds,
-            } => self.execute_match_rel(src_node, rel_var, rel_type, dst_node, filter, projections, order_by, skip, limit, path_bounds),
+            } => self.execute_match_rel(&src_node, rel_var.as_ref(), &rel_type, &dst_node, filter.as_ref(), &projections, order_by.as_ref(), skip, limit, path_bounds),
 
             Statement::Copy {
                 table_name,
                 file_path,
                 options,
-            } => self.execute_copy(table_name, file_path, options),
+            } => self.execute_copy(&table_name, &file_path, &options),
 
             Statement::Explain { inner } => self.execute_explain(*inner),
         }
@@ -1037,7 +1037,7 @@ impl Database {
     fn execute_create_node(
         &mut self,
         label: &str,
-        properties: Vec<(String, Literal)>,
+        properties: &[(String, Literal)],
     ) -> Result<QueryResult> {
         // Get table schema for table_id and column ordering
         let schema = self
@@ -1054,7 +1054,7 @@ impl Database {
 
         // Convert properties to a row, with type promotion for FLOAT64 columns
         let mut row: HashMap<String, Value> = HashMap::new();
-        for (name, literal) in &properties {
+        for (name, literal) in properties {
             let value = literal_to_value(literal);
             // Promote Int64 to Float64 if the column type is FLOAT64
             #[allow(clippy::cast_precision_loss)]
@@ -1136,11 +1136,11 @@ impl Database {
 
     fn execute_match(
         &self,
-        var: String,
+        var: &str,
         label: &str,
         filter: Option<parser::ast::Expression>,
         projections: &[ReturnItem],
-        order_by: Option<Vec<parser::ast::OrderByItem>>,
+        order_by: Option<&Vec<parser::ast::OrderByItem>>,
         skip: Option<i64>,
         limit: Option<i64>,
     ) -> Result<QueryResult> {
@@ -1168,7 +1168,7 @@ impl Database {
         }
 
         // Build the execution pipeline
-        let scan = ScanOperator::new(Arc::clone(table), var.clone());
+        let scan = ScanOperator::new(Arc::clone(table), var.to_string());
         let mut operator: Box<dyn PhysicalOperator> = Box::new(scan);
 
         // Add filter if present
@@ -1332,7 +1332,7 @@ impl Database {
         }
 
         // Apply ORDER BY if present
-        if let Some(ref order_items) = order_by {
+        if let Some(order_items) = order_by {
             rows.sort_by(|a, b| {
                 for order_item in order_items {
                     let col_name = format!("{}.{}", order_item.var, order_item.property);
@@ -1441,15 +1441,15 @@ impl Database {
 
     fn execute_match_create(
         &mut self,
-        src_node: NodeFilter,
-        dst_node: NodeFilter,
-        rel_type: String,
+        src_node: &NodeFilter,
+        dst_node: &NodeFilter,
+        rel_type: &str,
         rel_props: Vec<(String, Literal)>,
         _src_var: String,
         _dst_var: String,
     ) -> Result<QueryResult> {
         // Validate relationship table exists
-        let rel_schema = self.catalog.get_rel_table(&rel_type).ok_or_else(|| {
+        let rel_schema = self.catalog.get_rel_table(rel_type).ok_or_else(|| {
             RuzuError::SchemaError(format!("Relationship table '{rel_type}' does not exist"))
         })?;
         let rel_table_id = rel_schema.table_id;
@@ -1491,7 +1491,7 @@ impl Database {
             .collect();
 
         // Get mutable reference to relationship table
-        let rel_table = self.rel_tables.get_mut(&rel_type).ok_or_else(|| {
+        let rel_table = self.rel_tables.get_mut(rel_type).ok_or_else(|| {
             RuzuError::ExecutionError(format!(
                 "Relationship table '{rel_type}' not found in storage"
             ))
@@ -1540,13 +1540,13 @@ impl Database {
 
     fn execute_match_rel(
         &self,
-        src_node: NodeFilter,
-        rel_var: Option<String>,
-        rel_type: String,
-        dst_node: NodeFilter,
-        filter: Option<parser::ast::Expression>,
-        projections: Vec<ReturnItem>,
-        order_by: Option<Vec<parser::ast::OrderByItem>>,
+        src_node: &NodeFilter,
+        rel_var: Option<&String>,
+        rel_type: &str,
+        dst_node: &NodeFilter,
+        filter: Option<&parser::ast::Expression>,
+        projections: &[ReturnItem],
+        order_by: Option<&Vec<parser::ast::OrderByItem>>,
         skip: Option<i64>,
         limit: Option<i64>,
         path_bounds: Option<(u32, u32)>,
@@ -1559,7 +1559,7 @@ impl Database {
             }
         }).collect();
         // Validate relationship table exists
-        let rel_schema = self.catalog.get_rel_table(&rel_type).ok_or_else(|| {
+        let rel_schema = self.catalog.get_rel_table(rel_type).ok_or_else(|| {
             RuzuError::SchemaError(format!("Relationship table '{rel_type}' does not exist"))
         })?;
 
@@ -1573,7 +1573,7 @@ impl Database {
         })?;
 
         // Get relationship table
-        let rel_table = self.rel_tables.get(&rel_type).ok_or_else(|| {
+        let rel_table = self.rel_tables.get(rel_type).ok_or_else(|| {
             RuzuError::ExecutionError(format!(
                 "Relationship table '{rel_type}' not found in storage"
             ))
@@ -1695,13 +1695,13 @@ impl Database {
 
                 // Apply WHERE clause filter if present
                 // We need to evaluate the filter before building the output row
-                if let Some(ref expr) = filter {
+                if let Some(expr) = filter {
                     // Get the filter value directly from the table
                     let filter_val = if expr.var == src_node.var {
                         src_table.get(src_offset, &expr.property)
                     } else if expr.var == dst_node.var {
                         dst_table.get(dst_offset as usize, &expr.property)
-                    } else if rel_var.as_ref() == Some(&expr.var) {
+                    } else if rel_var == Some(&expr.var) {
                         // Relationship property
                         if let Some(props) = rel_table.get_properties(rel_id) {
                             rel_schema
@@ -1769,7 +1769,7 @@ impl Database {
                         if let Some(val) = dst_table.get(dst_offset as usize, prop) {
                             row.set(col_name, val);
                         }
-                    } else if rel_var.as_ref() == Some(var) {
+                    } else if rel_var == Some(var) {
                         // Relationship property
                         if let Some(props) = rel_table.get_properties(rel_id) {
                             // Find property by name from schema
@@ -1791,7 +1791,7 @@ impl Database {
         } // end else (single-hop traversal)
 
         // Apply ORDER BY if present
-        if let Some(ref order_items) = order_by {
+        if let Some(order_items) = order_by {
             rows.sort_by(|a, b| {
                 for order_item in order_items {
                     let col_name = format!("{}.{}", order_item.var, order_item.property);
@@ -1841,11 +1841,11 @@ impl Database {
     /// Automatically detects whether the target is a node table or relationship table.
     fn execute_copy(
         &mut self,
-        table_name: String,
-        file_path: String,
-        options: CopyOptions,
+        table_name: &str,
+        file_path: &str,
+        options: &CopyOptions,
     ) -> Result<QueryResult> {
-        let path = std::path::Path::new(&file_path);
+        let path = std::path::Path::new(file_path);
 
         // Build CSV import config from copy options
         let mut config = storage::CsvImportConfig::default();

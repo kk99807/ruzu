@@ -1571,7 +1571,7 @@ mod memory_contract_tests {
         };
 
         // Migrate to version 2
-        let v2_header = DatabaseHeader::from_v1(v1_header);
+        let v2_header = DatabaseHeader::from_v1(&v1_header);
 
         // Verify all fields migrated correctly
         assert_eq!(v2_header.magic, *ruzu::storage::MAGIC_BYTES);

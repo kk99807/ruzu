@@ -322,7 +322,7 @@ impl DatabaseHeader {
                 })?;
 
                 // Migrate v1 to v2
-                let mut v2_header = Self::from_v1(v1_header);
+                let mut v2_header = Self::from_v1(&v1_header);
                 // Recompute checksum after migration
                 v2_header.update_checksum();
                 Ok(v2_header)
@@ -357,7 +357,7 @@ impl DatabaseHeader {
             })?;
 
             // Migrate v1 → v2 → v3
-            let mut header = Self::from_v1(v1_header);
+            let mut header = Self::from_v1(&v1_header);
             header.version = CURRENT_VERSION;
             header.update_checksum();
             Ok((header, true)) // Migration occurred
@@ -393,7 +393,7 @@ impl DatabaseHeader {
     /// Version 1 databases do not have the `rel_metadata_range` field.
     /// This function creates a current-version header with relationship metadata allocated at page 3.
     #[must_use]
-    pub fn from_v1(v1: DatabaseHeaderV1) -> Self {
+    pub fn from_v1(v1: &DatabaseHeaderV1) -> Self {
         Self {
             magic: v1.magic,
             version: CURRENT_VERSION,
