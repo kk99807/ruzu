@@ -15,7 +15,7 @@ use crate::planner::logical_plan::LogicalPlan;
 pub struct ProjectionPushdownRule;
 
 impl OptimizerRule for ProjectionPushdownRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ProjectionPushdown"
     }
 

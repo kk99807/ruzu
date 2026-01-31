@@ -42,7 +42,7 @@ impl<T> Transformed<T> {
 /// Optimizer rule trait.
 pub trait OptimizerRule: Send + Sync {
     /// Returns the name of this rule.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Rewrites the logical plan if applicable.
     ///
@@ -247,7 +247,7 @@ fn simplify_predicate(expr: &BoundExpression) -> BoundExpression {
 pub struct PredicateSimplificationRule;
 
 impl OptimizerRule for PredicateSimplificationRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "PredicateSimplification"
     }
 
@@ -290,7 +290,7 @@ impl OptimizerRule for PredicateSimplificationRule {
 pub struct ConstantFoldingRule;
 
 impl OptimizerRule for ConstantFoldingRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ConstantFolding"
     }
 
