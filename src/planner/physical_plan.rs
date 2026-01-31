@@ -33,7 +33,7 @@ impl<'a> PlanMapper<'a> {
                     desc.push_str(&format!(" filters={}", pushed_filters.len()));
                 }
                 if let Some(proj) = projection {
-                    desc.push_str(&format!(" projection={:?}", proj));
+                    desc.push_str(&format!(" projection={proj:?}"));
                 }
                 desc
             }
@@ -61,14 +61,13 @@ impl<'a> PlanMapper<'a> {
             LogicalPlan::Project { input, expressions } => {
                 let cols: Vec<_> = expressions.iter().map(|(name, _)| name.as_str()).collect();
                 let child = self.describe_plan(input, indent + 1);
-                format!("{prefix}Project [{:?}]\n{child}", cols)
+                format!("{prefix}Project [{cols:?}]\n{child}")
             }
             LogicalPlan::HashJoin { left, right, left_keys, right_keys, join_type } => {
                 let left_child = self.describe_plan(left, indent + 1);
                 let right_child = self.describe_plan(right, indent + 1);
                 format!(
-                    "{prefix}HashJoin [{:?}] on {:?} = {:?}\n{left_child}\n{right_child}",
-                    join_type, left_keys, right_keys
+                    "{prefix}HashJoin [{join_type:?}] on {left_keys:?} = {right_keys:?}\n{left_child}\n{right_child}"
                 )
             }
             LogicalPlan::Aggregate { input, group_by, aggregates } => {
@@ -85,7 +84,7 @@ impl<'a> PlanMapper<'a> {
             }
             LogicalPlan::Limit { input, skip, limit } => {
                 let child = self.describe_plan(input, indent + 1);
-                format!("{prefix}Limit [skip={:?}, limit={:?}]\n{child}", skip, limit)
+                format!("{prefix}Limit [skip={skip:?}, limit={limit:?}]\n{child}")
             }
             LogicalPlan::Union { inputs, all } => {
                 let children: Vec<_> = inputs.iter()

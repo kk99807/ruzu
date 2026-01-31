@@ -57,7 +57,7 @@ impl MmapReader {
 
         let metadata = file
             .metadata()
-            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {}", e)))?;
+            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {e}")))?;
         let file_size = metadata.len();
 
         // Try mmap for large files
@@ -66,7 +66,7 @@ impl MmapReader {
                 Ok(reader) => return Ok(reader),
                 Err(e) => {
                     // Log warning and fall back to buffered I/O
-                    eprintln!("Warning: mmap failed, falling back to buffered I/O: {}", e);
+                    eprintln!("Warning: mmap failed, falling back to buffered I/O: {e}");
                 }
             }
         }
@@ -91,7 +91,7 @@ impl MmapReader {
 
         let metadata = file
             .metadata()
-            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {}", e)))?;
+            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {e}")))?;
         let file_size = metadata.len();
 
         Self::try_mmap(&file, file_size)
@@ -104,7 +104,7 @@ impl MmapReader {
         // to the file during the import operation. If the file is modified
         // externally, behavior is undefined but will not cause memory unsafety.
         let mmap = unsafe { Mmap::map(file) }
-            .map_err(|e| RuzuError::StorageError(format!("mmap failed: {}", e)))?;
+            .map_err(|e| RuzuError::StorageError(format!("mmap failed: {e}")))?;
 
         Ok(MmapReader::Mmap { mmap, size })
     }
@@ -128,7 +128,7 @@ impl MmapReader {
                 if content.is_none() {
                     let mut buf = Vec::with_capacity(*size as usize);
                     reader.read_to_end(&mut buf).map_err(|e| {
-                        RuzuError::StorageError(format!("Failed to read file: {}", e))
+                        RuzuError::StorageError(format!("Failed to read file: {e}"))
                     })?;
                     *content = Some(buf);
                 }

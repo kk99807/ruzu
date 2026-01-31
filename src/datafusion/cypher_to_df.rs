@@ -26,7 +26,7 @@ impl CypherToDf {
             BoundExpression::PropertyAccess {
                 variable, property, ..
             } => {
-                let col_name = format!("{}.{}", variable, property);
+                let col_name = format!("{variable}.{property}");
                 col(&col_name, schema)
             }
             BoundExpression::VariableRef { variable, .. } => col(variable, schema),

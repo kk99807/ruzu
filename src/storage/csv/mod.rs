@@ -239,15 +239,13 @@ impl CsvImportConfig {
 
         if self.block_size < MIN_BLOCK_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "block_size must be at least {} bytes",
-                MIN_BLOCK_SIZE
+                "block_size must be at least {MIN_BLOCK_SIZE} bytes"
             )));
         }
 
         if self.block_size > MAX_BLOCK_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "block_size must be at most {} bytes",
-                MAX_BLOCK_SIZE
+                "block_size must be at most {MAX_BLOCK_SIZE} bytes"
             )));
         }
 
@@ -261,16 +259,14 @@ impl CsvImportConfig {
         const MAX_BATCH_SIZE: usize = 10_000_000;
         if self.batch_size > MAX_BATCH_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "batch_size must be at most {}",
-                MAX_BATCH_SIZE
+                "batch_size must be at most {MAX_BATCH_SIZE}"
             )));
         }
 
         const MIN_MMAP_THRESHOLD: u64 = 1024 * 1024; // 1MB
         if self.mmap_threshold < MIN_MMAP_THRESHOLD {
             return Err(RuzuError::ValidationError(format!(
-                "mmap_threshold must be at least {} bytes",
-                MIN_MMAP_THRESHOLD
+                "mmap_threshold must be at least {MIN_MMAP_THRESHOLD} bytes"
             )));
         }
 

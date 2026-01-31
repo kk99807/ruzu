@@ -571,12 +571,12 @@ impl Database {
 
         // T029: Read rel table data using multi-page support
         let rel_data_bytes = read_multi_page(buffer_pool, &header.rel_metadata_range)
-            .map_err(|e| RuzuError::RelTableLoadError(format!("Failed to read rel_table data: {}", e)))?;
+            .map_err(|e| RuzuError::RelTableLoadError(format!("Failed to read rel_table data: {e}")))?;
 
         if !rel_data_bytes.is_empty() {
             let rel_data_map: HashMap<String, RelTableData> =
                 bincode::deserialize(&rel_data_bytes).map_err(|e| {
-                    RuzuError::RelTableLoadError(format!("Failed to deserialize rel_tables: {}", e))
+                    RuzuError::RelTableLoadError(format!("Failed to deserialize rel_tables: {e}"))
                 })?;
 
             for (table_name, rel_data) in rel_data_map {
@@ -585,8 +585,7 @@ impl Database {
                     rel_tables.insert(table_name, rel_table);
                 } else {
                     return Err(RuzuError::RelTableCorrupted(format!(
-                        "Rel table '{}' has data but no schema in catalog",
-                        table_name
+                        "Rel table '{table_name}' has data but no schema in catalog"
                     )));
                 }
             }
@@ -920,7 +919,7 @@ impl Database {
                     let proj_names: Vec<String> = projections.iter().map(|p| {
                         match p {
                             parser::ast::ReturnItem::Projection { var, property } => {
-                                format!("{}.{}", var, property)
+                                format!("{var}.{property}")
                             }
                             parser::ast::ReturnItem::Aggregate(agg) => {
                                 if let Some((var, prop)) = &agg.input {
@@ -969,7 +968,7 @@ impl Database {
                     let proj_names: Vec<String> = projections.iter().map(|p| {
                         match p {
                             parser::ast::ReturnItem::Projection { var, property } => {
-                                format!("{}.{}", var, property)
+                                format!("{var}.{property}")
                             }
                             parser::ast::ReturnItem::Aggregate(agg) => {
                                 if let Some((var, prop)) = &agg.input {
@@ -1210,9 +1209,9 @@ impl Database {
                         };
 
                         let col_name = if let Some((v, p)) = &agg.input {
-                            format!("{}({}.{})", agg_name, v, p)
+                            format!("{agg_name}({v}.{p})")
                         } else {
-                            format!("{}(*)", agg_name)
+                            format!("{agg_name}(*)")
                         };
                         output_columns.push(col_name.clone());
 

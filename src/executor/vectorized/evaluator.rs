@@ -35,19 +35,17 @@ impl VectorizedEvaluator {
             BoundExpression::PropertyAccess {
                 variable, property, ..
             } => {
-                let col_name = format!("{}.{}", variable, property);
+                let col_name = format!("{variable}.{property}");
                 batch.column_by_name(&col_name).cloned().ok_or_else(|| {
                     arrow::error::ArrowError::InvalidArgumentError(format!(
-                        "Column not found: {}",
-                        col_name
+                        "Column not found: {col_name}"
                     ))
                 })
             }
             BoundExpression::VariableRef { variable, .. } => {
                 batch.column_by_name(variable).cloned().ok_or_else(|| {
                     arrow::error::ArrowError::InvalidArgumentError(format!(
-                        "Column not found: {}",
-                        variable
+                        "Column not found: {variable}"
                     ))
                 })
             }

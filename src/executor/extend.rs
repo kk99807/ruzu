@@ -105,7 +105,7 @@ impl ExtendOperator {
         output.insert(dst_id_col, Value::Int64(dst_node_id as i64));
 
         if let Some(ref rel_var) = self.rel_variable {
-            let rel_id_col = format!("{}._id", rel_var);
+            let rel_id_col = format!("{rel_var}._id");
             output.insert(rel_id_col, Value::Int64(rel_id as i64));
 
             if let Some(props) = self.rel_table.get_properties(rel_id) {

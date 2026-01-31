@@ -377,8 +377,7 @@ impl DatabaseHeader {
             // Current version — no migration needed
             let header = bincode::deserialize::<Self>(data).map_err(|e| {
                 crate::error::RuzuError::StorageError(format!(
-                    "Failed to deserialize v{} header: {e}",
-                    CURRENT_VERSION
+                    "Failed to deserialize v{CURRENT_VERSION} header: {e}"
                 ))
             })?;
             Ok((header, false)) // No migration needed

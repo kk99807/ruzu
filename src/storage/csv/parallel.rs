@@ -198,7 +198,7 @@ impl ParallelCsvReader {
         num_threads: Option<usize>,
     ) -> Result<Self, RuzuError> {
         let metadata = std::fs::metadata(path)
-            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {}", e)))?;
+            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {e}")))?;
         let file_size = metadata.len();
 
         // Calculate number of blocks

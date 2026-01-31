@@ -264,7 +264,7 @@ impl OptimizerRule for PredicateSimplificationRule {
                     }
                     ConstantValue::Unknown => {
                         // Check if predicate changed
-                        if format!("{:?}", predicate) != format!("{:?}", simplified) {
+                        if format!("{predicate:?}") != format!("{simplified:?}") {
                             Ok(Transformed::Yes(LogicalPlan::Filter {
                                 input,
                                 predicate: simplified,

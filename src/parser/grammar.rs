@@ -588,7 +588,7 @@ fn build_aggregate_expr(pair: pest::iterators::Pair<Rule>) -> Result<ReturnItem>
                 func = Some(AstAggregateFunction::parse(func_name).ok_or_else(|| RuzuError::ParseError {
                     line: 0,
                     col: 0,
-                    message: format!("Unknown aggregate function: {}", func_name),
+                    message: format!("Unknown aggregate function: {func_name}"),
                 })?);
             }
             Rule::projection => {
@@ -670,7 +670,7 @@ fn build_path_length(pair: pest::iterators::Pair<Rule>) -> Result<(u32, u32)> {
         return Err(RuzuError::ParseError {
             line: 0,
             col: 0,
-            message: format!("Invalid path length: min {} > max {}", min_hops, max_hops),
+            message: format!("Invalid path length: min {min_hops} > max {max_hops}"),
         });
     }
 

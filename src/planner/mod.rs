@@ -170,7 +170,7 @@ impl<'a> Planner<'a> {
     #[must_use]
     pub fn explain(&self, plan: &LogicalPlan) -> String {
         // Use the Display trait for formatted output
-        format!("{}", plan)
+        format!("{plan}")
     }
 
     /// Returns a detailed EXPLAIN with optimization info.
@@ -179,11 +179,11 @@ impl<'a> Planner<'a> {
         let mut output = String::new();
 
         output.push_str("=== Logical Plan ===\n");
-        output.push_str(&format!("{}", plan));
+        output.push_str(&format!("{plan}"));
 
         output.push_str("\n=== Output Schema ===\n");
         for (name, dtype) in plan.output_schema() {
-            output.push_str(&format!("  {} : {:?}\n", name, dtype));
+            output.push_str(&format!("  {name} : {dtype:?}\n"));
         }
 
         output
