@@ -39,6 +39,9 @@ use crate::error::RuzuError;
 use crate::storage::csv::{CsvImportConfig, ImportError, ImportProgress};
 use crate::types::Value;
 
+/// Result of a parallel CSV read: (parsed rows, non-fatal errors, bytes processed).
+type ParallelReadResult = Result<(Vec<Vec<Value>>, Vec<ImportError>, u64), RuzuError>;
+
 /// Work assignment for a single block of the CSV file.
 #[derive(Debug, Clone)]
 pub struct BlockAssignment {
@@ -548,7 +551,7 @@ pub fn parallel_read_all<F>(
     data: &[u8],
     config: &CsvImportConfig,
     parse_row: F,
-) -> Result<(Vec<Vec<Value>>, Vec<ImportError>, u64), RuzuError>
+) -> ParallelReadResult
 where
     F: Fn(&csv::ByteRecord, u64) -> Result<Vec<Value>, ImportError> + Sync + Send,
 {

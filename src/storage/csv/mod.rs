@@ -42,6 +42,7 @@ use crate::error::RuzuError;
 
 /// Configuration for CSV import operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct CsvImportConfig {
     // CSV parsing options
     /// Field separator (default: ',').

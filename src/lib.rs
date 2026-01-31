@@ -20,6 +20,24 @@ pub use error::{Result, RuzuError};
 pub use types::{QueryResult, Row, Value};
 
 use catalog::{Catalog, ColumnDef, Direction, NodeTableSchema, RelTableSchema};
+
+/// Shared query clause parameters for MATCH execution.
+struct QueryModifiers<'a> {
+    projections: &'a [ReturnItem],
+    order_by: Option<&'a Vec<parser::ast::OrderByItem>>,
+    skip: Option<i64>,
+    limit: Option<i64>,
+}
+
+/// Relationship pattern parameters for MATCH-REL execution.
+struct RelPattern<'a> {
+    src_node: &'a NodeFilter,
+    rel_var: Option<&'a String>,
+    rel_type: &'a str,
+    dst_node: &'a NodeFilter,
+    filter: Option<&'a parser::ast::Expression>,
+    path_bounds: Option<(u32, u32)>,
+}
 use executor::{FilterOperator, PhysicalOperator, ProjectOperator, ScanOperator};
 pub use executor::{ExecutorConfig, QueryExecutor};
 use parser::ast::{CopyOptions, Literal, NodeFilter, ReturnItem, Statement};
@@ -847,7 +865,12 @@ impl Database {
                 order_by,
                 skip,
                 limit,
-            } => self.execute_match(&var, &label, filter, &projections, order_by.as_ref(), skip, limit),
+            } => self.execute_match(&var, &label, filter, &QueryModifiers {
+                projections: &projections,
+                order_by: order_by.as_ref(),
+                skip,
+                limit,
+            }),
 
             Statement::CreateRelTable {
                 table_name,
@@ -878,7 +901,22 @@ impl Database {
                 skip,
                 limit,
                 path_bounds,
-            } => self.execute_match_rel(&src_node, rel_var.as_ref(), &rel_type, &dst_node, filter.as_ref(), &projections, order_by.as_ref(), skip, limit, path_bounds),
+            } => self.execute_match_rel(
+                &RelPattern {
+                    src_node: &src_node,
+                    rel_var: rel_var.as_ref(),
+                    rel_type: &rel_type,
+                    dst_node: &dst_node,
+                    filter: filter.as_ref(),
+                    path_bounds,
+                },
+                &QueryModifiers {
+                    projections: &projections,
+                    order_by: order_by.as_ref(),
+                    skip,
+                    limit,
+                },
+            ),
 
             Statement::Copy {
                 table_name,
@@ -1139,12 +1177,13 @@ impl Database {
         var: &str,
         label: &str,
         filter: Option<parser::ast::Expression>,
-        projections: &[ReturnItem],
-        order_by: Option<&Vec<parser::ast::OrderByItem>>,
-        skip: Option<i64>,
-        limit: Option<i64>,
+        modifiers: &QueryModifiers<'_>,
     ) -> Result<QueryResult> {
         use parser::ast::AstAggregateFunction;
+        let projections = modifiers.projections;
+        let order_by = modifiers.order_by;
+        let skip = modifiers.skip;
+        let limit = modifiers.limit;
 
         // Get the table
         let table = self
@@ -1540,17 +1579,19 @@ impl Database {
 
     fn execute_match_rel(
         &self,
-        src_node: &NodeFilter,
-        rel_var: Option<&String>,
-        rel_type: &str,
-        dst_node: &NodeFilter,
-        filter: Option<&parser::ast::Expression>,
-        projections: &[ReturnItem],
-        order_by: Option<&Vec<parser::ast::OrderByItem>>,
-        skip: Option<i64>,
-        limit: Option<i64>,
-        path_bounds: Option<(u32, u32)>,
+        rel: &RelPattern<'_>,
+        modifiers: &QueryModifiers<'_>,
     ) -> Result<QueryResult> {
+        let src_node = rel.src_node;
+        let rel_var = rel.rel_var;
+        let rel_type = rel.rel_type;
+        let dst_node = rel.dst_node;
+        let filter = rel.filter;
+        let path_bounds = rel.path_bounds;
+        let projections = modifiers.projections;
+        let order_by = modifiers.order_by;
+        let skip = modifiers.skip;
+        let limit = modifiers.limit;
         // Convert ReturnItem to (String, String) for now - aggregates in rel queries handled later
         let simple_projections: Vec<(String, String)> = projections.iter().filter_map(|item| {
             match item {
