@@ -1179,7 +1179,6 @@ impl Database {
         filter: Option<parser::ast::Expression>,
         modifiers: &QueryModifiers<'_>,
     ) -> Result<QueryResult> {
-        use parser::ast::AstAggregateFunction;
         let projections = modifiers.projections;
         let order_by = modifiers.order_by;
         let skip = modifiers.skip;
@@ -1223,140 +1222,7 @@ impl Database {
                 rows.push(row);
             }
 
-            // Compute aggregates
-            let mut result_row = Row::new();
-            let mut output_columns = Vec::new();
-
-            for item in projections {
-                match item {
-                    ReturnItem::Projection { var: v, property } => {
-                        let col_name = format!("{v}.{property}");
-                        output_columns.push(col_name.clone());
-                        // For non-aggregates with aggregates, use the first row's value (if any)
-                        if let Some(first_row) = rows.first() {
-                            if let Some(val) = first_row.get(&col_name) {
-                                result_row.set(col_name, val.clone());
-                            }
-                        }
-                    }
-                    ReturnItem::Aggregate(agg) => {
-                        let agg_name = match agg.function {
-                            AstAggregateFunction::Count => "COUNT",
-                            AstAggregateFunction::Sum => "SUM",
-                            AstAggregateFunction::Avg => "AVG",
-                            AstAggregateFunction::Min => "MIN",
-                            AstAggregateFunction::Max => "MAX",
-                        };
-
-                        let col_name = if let Some((v, p)) = &agg.input {
-                            format!("{agg_name}({v}.{p})")
-                        } else {
-                            format!("{agg_name}(*)")
-                        };
-                        output_columns.push(col_name.clone());
-
-                        // Compute aggregate value
-                        let agg_value = match agg.function {
-                            AstAggregateFunction::Count => {
-                                if agg.input.is_none() {
-                                    // COUNT(*)
-                                    Value::Int64(i64::try_from(rows.len()).unwrap_or(i64::MAX))
-                                } else {
-                                    // COUNT(property) - count non-null values
-                                    let (v, p) = agg.input.as_ref().unwrap();
-                                    let prop_name = format!("{v}.{p}");
-                                    let count = rows.iter()
-                                        .filter(|r| r.get(&prop_name).is_some() && !matches!(r.get(&prop_name), Some(Value::Null)))
-                                        .count();
-                                    Value::Int64(i64::try_from(count).unwrap_or(i64::MAX))
-                                }
-                            }
-                            AstAggregateFunction::Sum => {
-                                let (v, p) = agg.input.as_ref().ok_or_else(|| {
-                                    RuzuError::ExecutionError("SUM requires an argument".into())
-                                })?;
-                                let prop_name = format!("{v}.{p}");
-                                let sum: i64 = rows.iter()
-                                    .filter_map(|r| r.get(&prop_name))
-                                    .filter_map(|v| match v {
-                                        Value::Int64(n) => Some(*n),
-                                        _ => None,
-                                    })
-                                    .sum();
-                                Value::Int64(sum)
-                            }
-                            AstAggregateFunction::Avg => {
-                                let (v, p) = agg.input.as_ref().ok_or_else(|| {
-                                    RuzuError::ExecutionError("AVG requires an argument".into())
-                                })?;
-                                let prop_name = format!("{v}.{p}");
-                                let values: Vec<i64> = rows.iter()
-                                    .filter_map(|r| r.get(&prop_name))
-                                    .filter_map(|v| match v {
-                                        Value::Int64(n) => Some(*n),
-                                        _ => None,
-                                    })
-                                    .collect();
-                                if values.is_empty() {
-                                    Value::Null
-                                } else {
-                                    let sum: i64 = values.iter().sum();
-                                    #[allow(clippy::cast_precision_loss)]
-                                    let avg = sum as f64 / values.len() as f64;
-                                    Value::Float64(avg)
-                                }
-                            }
-                            AstAggregateFunction::Min => {
-                                let (v, p) = agg.input.as_ref().ok_or_else(|| {
-                                    RuzuError::ExecutionError("MIN requires an argument".into())
-                                })?;
-                                let prop_name = format!("{v}.{p}");
-                                let values: Vec<&Value> = rows.iter()
-                                    .filter_map(|r| r.get(&prop_name))
-                                    .filter(|v| !v.is_null())
-                                    .collect();
-                                if values.is_empty() {
-                                    Value::Null
-                                } else {
-                                    let mut min_val = values[0].clone();
-                                    for v in &values[1..] {
-                                        if let Some(std::cmp::Ordering::Less) = (*v).compare(&min_val) {
-                                            min_val = (*v).clone();
-                                        }
-                                    }
-                                    min_val
-                                }
-                            }
-                            AstAggregateFunction::Max => {
-                                let (v, p) = agg.input.as_ref().ok_or_else(|| {
-                                    RuzuError::ExecutionError("MAX requires an argument".into())
-                                })?;
-                                let prop_name = format!("{v}.{p}");
-                                let values: Vec<&Value> = rows.iter()
-                                    .filter_map(|r| r.get(&prop_name))
-                                    .filter(|v| !v.is_null())
-                                    .collect();
-                                if values.is_empty() {
-                                    Value::Null
-                                } else {
-                                    let mut max_val = values[0].clone();
-                                    for v in &values[1..] {
-                                        if let Some(std::cmp::Ordering::Greater) = (*v).compare(&max_val) {
-                                            max_val = (*v).clone();
-                                        }
-                                    }
-                                    max_val
-                                }
-                            }
-                        };
-                        result_row.set(col_name, agg_value);
-                    }
-                }
-            }
-
-            let mut result = QueryResult::new(output_columns);
-            result.add_row(result_row);
-            return Ok(result);
+            return Self::compute_aggregates(&rows, projections);
         }
 
         // Add projection for non-aggregate queries
@@ -1414,6 +1280,148 @@ impl Database {
             result.add_row(row);
         }
 
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn compute_aggregates(
+        rows: &[Row],
+        projections: &[ReturnItem],
+    ) -> Result<QueryResult> {
+        use parser::ast::AstAggregateFunction;
+
+        let mut result_row = Row::new();
+        let mut output_columns = Vec::new();
+
+        for item in projections {
+            match item {
+                ReturnItem::Projection { var: v, property } => {
+                    let col_name = format!("{v}.{property}");
+                    output_columns.push(col_name.clone());
+                    // For non-aggregates with aggregates, use the first row's value (if any)
+                    if let Some(first_row) = rows.first() {
+                        if let Some(val) = first_row.get(&col_name) {
+                            result_row.set(col_name, val.clone());
+                        }
+                    }
+                }
+                ReturnItem::Aggregate(agg) => {
+                    let agg_name = match agg.function {
+                        AstAggregateFunction::Count => "COUNT",
+                        AstAggregateFunction::Sum => "SUM",
+                        AstAggregateFunction::Avg => "AVG",
+                        AstAggregateFunction::Min => "MIN",
+                        AstAggregateFunction::Max => "MAX",
+                    };
+
+                    let col_name = if let Some((v, p)) = &agg.input {
+                        format!("{agg_name}({v}.{p})")
+                    } else {
+                        format!("{agg_name}(*)")
+                    };
+                    output_columns.push(col_name.clone());
+
+                    // Compute aggregate value
+                    let agg_value = match agg.function {
+                        AstAggregateFunction::Count => {
+                            if agg.input.is_none() {
+                                // COUNT(*)
+                                Value::Int64(i64::try_from(rows.len()).unwrap_or(i64::MAX))
+                            } else {
+                                // COUNT(property) - count non-null values
+                                let (v, p) = agg.input.as_ref().unwrap();
+                                let prop_name = format!("{v}.{p}");
+                                let count = rows.iter()
+                                    .filter(|r| r.get(&prop_name).is_some() && !matches!(r.get(&prop_name), Some(Value::Null)))
+                                    .count();
+                                Value::Int64(i64::try_from(count).unwrap_or(i64::MAX))
+                            }
+                        }
+                        AstAggregateFunction::Sum => {
+                            let (v, p) = agg.input.as_ref().ok_or_else(|| {
+                                RuzuError::ExecutionError("SUM requires an argument".into())
+                            })?;
+                            let prop_name = format!("{v}.{p}");
+                            let sum: i64 = rows.iter()
+                                .filter_map(|r| r.get(&prop_name))
+                                .filter_map(|v| match v {
+                                    Value::Int64(n) => Some(*n),
+                                    _ => None,
+                                })
+                                .sum();
+                            Value::Int64(sum)
+                        }
+                        AstAggregateFunction::Avg => {
+                            let (v, p) = agg.input.as_ref().ok_or_else(|| {
+                                RuzuError::ExecutionError("AVG requires an argument".into())
+                            })?;
+                            let prop_name = format!("{v}.{p}");
+                            let values: Vec<i64> = rows.iter()
+                                .filter_map(|r| r.get(&prop_name))
+                                .filter_map(|v| match v {
+                                    Value::Int64(n) => Some(*n),
+                                    _ => None,
+                                })
+                                .collect();
+                            if values.is_empty() {
+                                Value::Null
+                            } else {
+                                let sum: i64 = values.iter().sum();
+                                #[allow(clippy::cast_precision_loss)]
+                                let avg = sum as f64 / values.len() as f64;
+                                Value::Float64(avg)
+                            }
+                        }
+                        AstAggregateFunction::Min => {
+                            let (v, p) = agg.input.as_ref().ok_or_else(|| {
+                                RuzuError::ExecutionError("MIN requires an argument".into())
+                            })?;
+                            let prop_name = format!("{v}.{p}");
+                            let values: Vec<&Value> = rows.iter()
+                                .filter_map(|r| r.get(&prop_name))
+                                .filter(|v| !v.is_null())
+                                .collect();
+                            if values.is_empty() {
+                                Value::Null
+                            } else {
+                                let mut min_val = values[0].clone();
+                                for v in &values[1..] {
+                                    if let Some(std::cmp::Ordering::Less) = (*v).compare(&min_val) {
+                                        min_val = (*v).clone();
+                                    }
+                                }
+                                min_val
+                            }
+                        }
+                        AstAggregateFunction::Max => {
+                            let (v, p) = agg.input.as_ref().ok_or_else(|| {
+                                RuzuError::ExecutionError("MAX requires an argument".into())
+                            })?;
+                            let prop_name = format!("{v}.{p}");
+                            let values: Vec<&Value> = rows.iter()
+                                .filter_map(|r| r.get(&prop_name))
+                                .filter(|v| !v.is_null())
+                                .collect();
+                            if values.is_empty() {
+                                Value::Null
+                            } else {
+                                let mut max_val = values[0].clone();
+                                for v in &values[1..] {
+                                    if let Some(std::cmp::Ordering::Greater) = (*v).compare(&max_val) {
+                                        max_val = (*v).clone();
+                                    }
+                                }
+                                max_val
+                            }
+                        }
+                    };
+                    result_row.set(col_name, agg_value);
+                }
+            }
+        }
+
+        let mut result = QueryResult::new(output_columns);
+        result.add_row(result_row);
         Ok(result)
     }
 
