@@ -28,6 +28,7 @@ pub struct NodeTableProvider {
 
 impl NodeTableProvider {
     /// Creates a new node table provider.
+    #[must_use]
     pub fn new(table: Arc<NodeTable>, table_schema: Arc<NodeTableSchema>) -> Self {
         let arrow_schema = Arc::new(node_schema_to_arrow(&table_schema));
         NodeTableProvider {
@@ -104,6 +105,7 @@ pub struct RelTableProvider {
 
 impl RelTableProvider {
     /// Creates a new relationship table provider.
+    #[must_use]
     pub fn new(arrow_schema: SchemaRef) -> Self {
         RelTableProvider { arrow_schema }
     }
@@ -151,6 +153,7 @@ fn node_schema_to_arrow(schema: &NodeTableSchema) -> Schema {
 }
 
 /// Converts a ruzu `DataType` to an Arrow `DataType`.
+#[must_use]
 pub fn datatype_to_arrow(dt: DataType) -> ArrowDataType {
     match dt {
         DataType::Int64 => ArrowDataType::Int64,
@@ -164,6 +167,7 @@ pub fn datatype_to_arrow(dt: DataType) -> ArrowDataType {
 }
 
 /// Converts an Arrow `DataType` to a ruzu `DataType`.
+#[must_use]
 pub fn arrow_to_datatype(dt: &ArrowDataType) -> Option<DataType> {
     match dt {
         ArrowDataType::Int64 => Some(DataType::Int64),

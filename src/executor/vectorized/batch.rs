@@ -18,6 +18,7 @@ pub struct VectorizedBatch {
 
 impl VectorizedBatch {
     /// Creates a new vectorized batch from a `RecordBatch`.
+    #[must_use]
     pub fn new(batch: RecordBatch) -> Self {
         VectorizedBatch {
             batch,
@@ -26,6 +27,7 @@ impl VectorizedBatch {
     }
 
     /// Creates a new vectorized batch with a selection vector.
+    #[must_use]
     pub fn with_selection(batch: RecordBatch, selection: SelectionVector) -> Self {
         VectorizedBatch {
             batch,
@@ -74,6 +76,7 @@ impl VectorizedBatch {
     }
 
     /// Returns a column by name.
+    #[must_use]
     pub fn column_by_name(&self, name: &str) -> Option<&ArrayRef> {
         let schema = self.batch.schema();
         schema.index_of(name).ok().map(|i| self.batch.column(i))
@@ -138,11 +141,13 @@ pub struct SelectionVector {
 
 impl SelectionVector {
     /// Creates a new selection vector with the given indices.
+    #[must_use]
     pub fn new(indices: Vec<u32>) -> Self {
         SelectionVector { indices }
     }
 
     /// Creates a selection vector selecting all rows up to count.
+    #[must_use]
     pub fn all(count: usize) -> Self {
         SelectionVector {
             indices: (0..count as u32).collect(),

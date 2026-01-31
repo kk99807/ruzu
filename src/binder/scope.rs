@@ -70,7 +70,6 @@ impl BinderScope {
     }
 
     /// Returns all variables in this scope (not including parents).
-    #[must_use]
     pub fn variables(&self) -> impl Iterator<Item = &BoundVariable> {
         self.variables.values()
     }

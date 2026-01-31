@@ -483,6 +483,7 @@ where
 ///
 /// This is an approximation since we don't know exact row boundaries without
 /// scanning the file. We estimate based on average bytes per row from block 0.
+#[must_use]
 pub fn estimate_row_offsets(
     data: &[u8],
     blocks: &[BlockAssignment],

@@ -20,6 +20,7 @@ impl<'a> PlanMapper<'a> {
     /// Converts a logical plan to a description string for debugging.
     ///
     /// In the full implementation, this would return Arc<dyn ExecutionPlan>.
+    #[must_use]
     pub fn describe(&self, plan: &LogicalPlan) -> String {
         self.describe_plan(plan, 0)
     }
