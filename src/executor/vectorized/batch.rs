@@ -82,6 +82,10 @@ impl VectorizedBatch {
     /// Applies the selection vector to produce a new batch with only selected rows.
     ///
     /// If there's no selection vector, returns the batch unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Arrow error if the take or record batch construction fails.
     pub fn materialize(&self) -> arrow::error::Result<RecordBatch> {
         if let Some(ref selection) = self.selection {
             let indices = UInt32Array::from(selection.indices.clone());
@@ -98,6 +102,10 @@ impl VectorizedBatch {
     }
 
     /// Applies a filter predicate to this batch, returning a new batch with selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Arrow error if the predicate is not a boolean array.
     pub fn filter(&self, predicate: &dyn Array) -> arrow::error::Result<Self> {
         let bool_array = predicate
             .as_any()

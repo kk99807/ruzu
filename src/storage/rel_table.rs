@@ -132,6 +132,11 @@ impl CsrNodeGroup {
     }
 
     /// Checks if the CSR invariants are satisfied.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any CSR invariant is violated (offsets, monotonicity,
+    /// or neighbor/rel-id array length mismatches).
     pub fn validate(&self) -> Result<()> {
         // Invariant 1: offsets[0] == 0
         if self.offsets.is_empty() || self.offsets[0] != 0 {
@@ -205,6 +210,10 @@ impl CsrNodeGroup {
     ///
     /// Note: This is expensive as it may require rebuilding the CSR.
     /// For bulk insertion, use `add_node_edges` during initial construction.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `local_node_id` is out of range.
     pub fn insert_edge(&mut self, local_node_id: u32, neighbor: u64, rel_id: u64) -> Result<()> {
         if local_node_id as usize >= self.num_nodes as usize {
             return Err(RuzuError::StorageError(format!(
@@ -230,12 +239,20 @@ impl CsrNodeGroup {
     }
 
     /// Serializes the CSR node group to bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if bincode serialization fails.
     pub fn serialize(&self) -> Result<Vec<u8>> {
         bincode::serialize(self)
             .map_err(|e| RuzuError::StorageError(format!("Failed to serialize CSR: {e}")))
     }
 
     /// Deserializes a CSR node group from bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data is malformed or bincode deserialization fails.
     pub fn deserialize(data: &[u8]) -> Result<Self> {
         bincode::deserialize(data)
             .map_err(|e| RuzuError::StorageError(format!("Failed to deserialize CSR: {e}")))
@@ -437,6 +454,10 @@ impl RelTable {
     /// # Returns
     ///
     /// The assigned relationship ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the property count does not match the schema.
     pub fn insert(&mut self, src_node_id: u64, dst_node_id: u64, props: Vec<Value>) -> Result<u64> {
         // Validate property count
         if props.len() != self.schema.columns.len() {

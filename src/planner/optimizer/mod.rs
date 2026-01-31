@@ -45,6 +45,10 @@ pub trait OptimizerRule: Send + Sync {
     fn name(&self) -> &str;
 
     /// Rewrites the logical plan if applicable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rewrite encounters an invalid plan structure.
     fn rewrite(&self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>>;
 }
 

@@ -309,6 +309,10 @@ impl NodeDataPage {
     }
 
     /// Deserializes a raw Page into a `NodeDataPage`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the page type is invalid or the checksum does not match.
     pub fn from_page(page: &Page) -> Result<Self> {
         // Read page header
         let page_type_raw = u32::from_le_bytes(page.data[0..4].try_into().unwrap());

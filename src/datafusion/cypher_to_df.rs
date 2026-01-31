@@ -17,6 +17,11 @@ pub struct CypherToDf;
 
 impl CypherToDf {
     /// Converts a bound expression to a `DataFusion` physical expression.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `DataFusion` error if the expression references a column not
+    /// present in the schema or contains an unsupported expression type.
     pub fn to_physical_expr(
         expr: &BoundExpression,
         schema: &Schema,

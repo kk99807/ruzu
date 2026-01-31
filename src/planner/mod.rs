@@ -56,6 +56,10 @@ impl<'a> Planner<'a> {
     }
 
     /// Generates a logical plan from a bound query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query graph is empty or cannot be planned.
     pub fn plan(&self, query: &BoundQuery) -> Result<LogicalPlan> {
         // Start with scan operators for each node in the query graph
         let mut plan = self.plan_query_graph(&query.query_graph)?;
@@ -139,6 +143,10 @@ impl<'a> Planner<'a> {
     }
 
     /// Applies all optimizer rules to the logical plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any optimizer rule fails during rewriting.
     pub fn optimize(&self, plan: LogicalPlan) -> Result<LogicalPlan> {
         let mut current_plan = plan;
 
@@ -151,6 +159,10 @@ impl<'a> Planner<'a> {
     }
 
     /// Applies all optimizer rules and returns both the plan and applied rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any optimizer rule fails during rewriting.
     pub fn optimize_with_tracking(&self, plan: LogicalPlan) -> Result<(LogicalPlan, Vec<String>)> {
         let mut current_plan = plan;
         let mut applied_rules = Vec::new();

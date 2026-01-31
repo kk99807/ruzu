@@ -27,6 +27,11 @@ impl VectorizedEvaluator {
     /// Evaluates a bound expression against a vectorized batch.
     ///
     /// Returns an Arrow array containing the result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Arrow error if the expression references a missing column or
+    /// if an arithmetic/comparison operation fails.
     pub fn evaluate(expr: &BoundExpression, batch: &VectorizedBatch) -> ArrowResult<ArrayRef> {
         match expr {
             BoundExpression::Literal { value, .. } => {

@@ -378,6 +378,11 @@ pub struct BlockResult {
 /// # Returns
 ///
 /// A `BlockResult` containing parsed rows and any errors encountered.
+///
+/// # Errors
+///
+/// Returns an error if the CSV reader cannot be constructed or a non-ignorable
+/// parse error occurs.
 pub fn process_block<F>(
     data: &[u8],
     block: &BlockAssignment,
@@ -534,6 +539,11 @@ pub fn estimate_row_offsets(
 /// # Returns
 ///
 /// A vector of all parsed rows in file order, plus aggregated errors and statistics.
+///
+/// # Errors
+///
+/// Returns an error if block assignment fails or any block encounters a
+/// non-ignorable parse error.
 pub fn parallel_read_all<F>(
     data: &[u8],
     config: &CsvImportConfig,
