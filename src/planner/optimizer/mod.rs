@@ -77,7 +77,6 @@ fn try_evaluate_constant(expr: &BoundExpression) -> ConstantValue {
                 ConstantValue::False
             }
         }
-        BoundExpression::Literal { .. } => ConstantValue::Unknown,
         BoundExpression::Comparison { left, op, right, .. } => {
             if let (
                 BoundExpression::Literal { value: left_val, .. },

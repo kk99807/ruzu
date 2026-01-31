@@ -210,7 +210,7 @@ impl ParallelCsvReader {
 
         // Determine thread count
         let available_threads = std::thread::available_parallelism()
-            .map(|p| p.get())
+            .map(std::num::NonZeroUsize::get)
             .unwrap_or(1);
         let num_threads = num_threads
             .unwrap_or(available_threads)

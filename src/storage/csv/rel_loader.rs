@@ -732,8 +732,8 @@ fn parse_field_with_interner(
         },
         DataType::String => {
             if let Some(interner) = interner {
-                let interned = interner.write().intern(field);
-                Ok(Value::String(interned.to_string()))
+                let interned_val = interner.write().intern(field);
+                Ok(Value::String(interned_val.to_string()))
             } else {
                 Ok(Value::String(field.to_string()))
             }

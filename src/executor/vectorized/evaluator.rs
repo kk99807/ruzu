@@ -35,7 +35,7 @@ impl VectorizedEvaluator {
     pub fn evaluate(expr: &BoundExpression, batch: &VectorizedBatch) -> ArrowResult<ArrayRef> {
         match expr {
             BoundExpression::Literal { value, .. } => {
-                Self::create_literal_array(value, batch.num_rows())
+                Ok(Self::create_literal_array(value, batch.num_rows()))
             }
             BoundExpression::PropertyAccess {
                 variable, property, ..
@@ -87,19 +87,19 @@ impl VectorizedEvaluator {
     }
 
     /// Creates a literal array with the same value repeated.
-    fn create_literal_array(value: &Value, len: usize) -> ArrowResult<ArrayRef> {
+    fn create_literal_array(value: &Value, len: usize) -> ArrayRef {
         match value {
-            Value::Int64(v) => Ok(Arc::new(Int64Array::from(vec![*v; len]))),
-            Value::Float32(v) => Ok(Arc::new(Float32Array::from(vec![*v; len]))),
-            Value::Float64(v) => Ok(Arc::new(Float64Array::from(vec![*v; len]))),
-            Value::Bool(v) => Ok(Arc::new(BooleanArray::from(vec![*v; len]))),
-            Value::String(v) => Ok(Arc::new(StringArray::from(vec![v.as_str(); len]))),
-            Value::Date(v) => Ok(Arc::new(arrow::array::Date32Array::from(vec![*v; len]))),
-            Value::Timestamp(v) => Ok(Arc::new(TimestampMicrosecondArray::from(vec![*v; len]))),
+            Value::Int64(v) => Arc::new(Int64Array::from(vec![*v; len])),
+            Value::Float32(v) => Arc::new(Float32Array::from(vec![*v; len])),
+            Value::Float64(v) => Arc::new(Float64Array::from(vec![*v; len])),
+            Value::Bool(v) => Arc::new(BooleanArray::from(vec![*v; len])),
+            Value::String(v) => Arc::new(StringArray::from(vec![v.as_str(); len])),
+            Value::Date(v) => Arc::new(arrow::array::Date32Array::from(vec![*v; len])),
+            Value::Timestamp(v) => Arc::new(TimestampMicrosecondArray::from(vec![*v; len])),
             Value::Null => {
                 // Create a null array of appropriate type (default to Int64)
                 let arr = Int64Array::from(vec![None::<i64>; len]);
-                Ok(Arc::new(arr))
+                Arc::new(arr)
             }
         }
     }

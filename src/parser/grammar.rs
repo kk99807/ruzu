@@ -52,9 +52,9 @@ fn build_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::explain_query => return build_explain_query(inner),
-            Rule::copy_from => return build_copy_from(inner),
+            Rule::copy_from => return Ok(build_copy_from(inner)),
             Rule::create_node_table => return Ok(build_create_node_table(inner)),
-            Rule::create_rel_table => return build_create_rel_table(inner),
+            Rule::create_rel_table => return Ok(build_create_rel_table(inner)),
             Rule::create_node => return build_create_node(inner),
             Rule::match_create => return build_match_create(inner),
             Rule::match_query => return build_match_query(inner),
@@ -84,7 +84,7 @@ fn build_explain_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     })
 }
 
-fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
+fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Statement {
     let mut table_name = String::new();
     let mut file_path = String::new();
     let mut options = CopyOptions::default();
@@ -150,11 +150,11 @@ fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Copy {
+    Statement::Copy {
         table_name,
         file_path,
         options,
-    })
+    }
 }
 
 fn parse_bool_literal(s: &str) -> bool {
@@ -205,7 +205,7 @@ fn build_create_node_table(pair: pest::iterators::Pair<Rule>) -> Statement {
     }
 }
 
-fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
+fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Statement {
     let mut table_name = String::new();
     let mut src_table = String::new();
     let mut dst_table = String::new();
@@ -237,12 +237,12 @@ fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement
         }
     }
 
-    Ok(Statement::CreateRelTable {
+    Statement::CreateRelTable {
         table_name,
         src_table,
         dst_table,
         columns,
-    })
+    }
 }
 
 fn build_create_node(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -486,7 +486,7 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 }
             }
             Rule::order_by_clause => {
-                order_by = Some(build_order_by_clause(inner)?);
+                order_by = Some(build_order_by_clause(inner));
             }
             Rule::skip_clause => {
                 for skip_inner in inner.into_inner() {
@@ -611,7 +611,7 @@ fn build_aggregate_expr(pair: pest::iterators::Pair<Rule>) -> Result<ReturnItem>
     }
 }
 
-fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<OrderByItem>> {
+fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Vec<OrderByItem> {
     let mut items = Vec::new();
 
     for inner in pair.into_inner() {
@@ -642,7 +642,7 @@ fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<OrderB
         }
     }
 
-    Ok(items)
+    items
 }
 
 fn build_path_length(pair: pest::iterators::Pair<Rule>) -> Result<(u32, u32)> {

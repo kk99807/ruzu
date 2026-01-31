@@ -155,7 +155,7 @@ impl PageState {
                     }
                     // CAS failed, retry
                 }
-                Ok(PageStateValue::Locked) | Ok(PageStateValue::Evicted) | Err(()) => {
+                Ok(PageStateValue::Locked | PageStateValue::Evicted) | Err(()) => {
                     return false;
                 }
             }
