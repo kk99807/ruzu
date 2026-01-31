@@ -402,6 +402,69 @@ fn build_node_filter(pair: pest::iterators::Pair<Rule>) -> Result<NodeFilter> {
     })
 }
 
+/// Extracts an integer literal from a clause pair (used for SKIP and LIMIT).
+fn parse_integer_clause(pair: pest::iterators::Pair<Rule>, name: &str) -> Result<i64> {
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::integer_literal {
+            return inner.as_str().parse().map_err(|_| RuzuError::ParseError {
+                line: 0,
+                col: 0,
+                message: format!("Invalid {name} value"),
+            });
+        }
+    }
+    Err(RuzuError::ParseError {
+        line: 0,
+        col: 0,
+        message: format!("Missing integer in {name} clause"),
+    })
+}
+
+/// Parses a `match_rel_pattern` pair into its component parts.
+fn build_rel_pattern(
+    pair: pest::iterators::Pair<Rule>,
+) -> Result<(Option<NodeFilter>, Option<NodeFilter>, Option<String>, String, Option<(u32, u32)>)> {
+    let mut src_node = None;
+    let mut dst_node = None;
+    let mut rel_var = None;
+    let mut rel_type = String::new();
+    let mut path_bounds = None;
+
+    for rel_inner in pair.into_inner() {
+        match rel_inner.as_rule() {
+            Rule::match_node_with_filter => {
+                let node_filter = build_node_filter_with_optional_props(rel_inner)?;
+                if src_node.is_none() {
+                    src_node = Some(node_filter);
+                } else {
+                    dst_node = Some(node_filter);
+                }
+            }
+            Rule::match_rel_type => {
+                for type_inner in rel_inner.into_inner() {
+                    match type_inner.as_rule() {
+                        Rule::identifier => {
+                            if rel_type.is_empty() {
+                                rel_type = type_inner.as_str().to_string();
+                            } else {
+                                rel_var = Some(std::mem::take(&mut rel_type));
+                                rel_type = type_inner.as_str().to_string();
+                            }
+                        }
+                        Rule::path_length => {
+                            path_bounds = Some(build_path_length(type_inner)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok((src_node, dst_node, rel_var, rel_type, path_bounds))
+}
+
 fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut var = String::new();
     let mut label = String::new();
@@ -410,7 +473,6 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut order_by = None;
     let mut skip = None;
     let mut limit = None;
-    let mut path_bounds = None;
 
     // Check if this is a relationship match or a simple node match
     let mut is_rel_match = false;
@@ -418,6 +480,7 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut dst_node = None;
     let mut rel_var = None;
     let mut rel_type = String::new();
+    let mut path_bounds = None;
 
     for inner in pair.clone().into_inner() {
         if inner.as_rule() == Rule::match_rel_pattern {
@@ -434,42 +497,12 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 label = idents.next().unwrap().as_str().to_string();
             }
             Rule::match_rel_pattern => {
-                for rel_inner in inner.into_inner() {
-                    match rel_inner.as_rule() {
-                        Rule::match_node_with_filter => {
-                            let node_filter = build_node_filter_with_optional_props(rel_inner)?;
-                            if src_node.is_none() {
-                                src_node = Some(node_filter);
-                            } else {
-                                dst_node = Some(node_filter);
-                            }
-                        }
-                        Rule::match_rel_type => {
-                            for type_inner in rel_inner.into_inner() {
-                                match type_inner.as_rule() {
-                                    Rule::identifier => {
-                                        if rel_type.is_empty() {
-                                            // Could be variable or type
-                                            let s = type_inner.as_str().to_string();
-                                            // If there's another identifier, this was the variable
-                                            // Otherwise it's the type
-                                            rel_type = s;
-                                        } else {
-                                            // Previous was variable, this is type
-                                            rel_var = Some(std::mem::take(&mut rel_type));
-                                            rel_type = type_inner.as_str().to_string();
-                                        }
-                                    }
-                                    Rule::path_length => {
-                                        path_bounds = Some(build_path_length(type_inner)?);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                let result = build_rel_pattern(inner)?;
+                src_node = result.0;
+                dst_node = result.1;
+                rel_var = result.2;
+                rel_type = result.3;
+                path_bounds = result.4;
             }
             Rule::where_clause => {
                 for where_inner in inner.into_inner() {
@@ -489,26 +522,10 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 order_by = Some(build_order_by_clause(inner));
             }
             Rule::skip_clause => {
-                for skip_inner in inner.into_inner() {
-                    if skip_inner.as_rule() == Rule::integer_literal {
-                        skip = Some(skip_inner.as_str().parse().map_err(|_| RuzuError::ParseError {
-                            line: 0,
-                            col: 0,
-                            message: "Invalid SKIP value".into(),
-                        })?);
-                    }
-                }
+                skip = Some(parse_integer_clause(inner, "SKIP")?);
             }
             Rule::limit_clause => {
-                for limit_inner in inner.into_inner() {
-                    if limit_inner.as_rule() == Rule::integer_literal {
-                        limit = Some(limit_inner.as_str().parse().map_err(|_| RuzuError::ParseError {
-                            line: 0,
-                            col: 0,
-                            message: "Invalid LIMIT value".into(),
-                        })?);
-                    }
-                }
+                limit = Some(parse_integer_clause(inner, "LIMIT")?);
             }
             _ => {}
         }
