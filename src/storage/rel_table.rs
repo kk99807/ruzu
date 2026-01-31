@@ -76,7 +76,7 @@ impl CsrNodeGroup {
     /// Asserts CSR invariants in debug builds.
     ///
     /// Validates that offsets are non-empty, monotonically non-decreasing,
-    /// and that neighbors/rel_ids lengths match the total edge count.
+    /// and that `neighbors/rel_ids` lengths match the total edge count.
     #[cfg(debug_assertions)]
     fn debug_assert_invariants(&self, direction: &str) {
         debug_assert!(

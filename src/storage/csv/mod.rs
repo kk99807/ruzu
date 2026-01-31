@@ -545,6 +545,25 @@ impl ImportResult {
 /// Callback type for progress reporting.
 pub type ProgressCallback = Box<dyn Fn(ImportProgress) + Send>;
 
+/// Estimates the average row size in bytes by sampling newlines near the start of the data.
+///
+/// Returns a default of 100 if the data is empty or contains no newlines in the sample.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn estimate_avg_row_size(data: &[u8]) -> usize {
+    if data.is_empty() {
+        return 100;
+    }
+    let sample_size = (64 * 1024).min(data.len());
+    let newlines = data[..sample_size]
+        .iter()
+        .fold(0usize, |n, &b| n + usize::from(b == b'\n'));
+    if newlines > 0 {
+        sample_size / newlines
+    } else {
+        100
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
