@@ -420,39 +420,48 @@ fn parse_integer_clause(pair: pest::iterators::Pair<Rule>, name: &str) -> Result
     })
 }
 
+/// Parsed components of a relationship match pattern.
+struct RelPattern {
+    src_node: Option<NodeFilter>,
+    dst_node: Option<NodeFilter>,
+    rel_var: Option<String>,
+    rel_type: String,
+    path_bounds: Option<(u32, u32)>,
+}
+
 /// Parses a `match_rel_pattern` pair into its component parts.
-fn build_rel_pattern(
-    pair: pest::iterators::Pair<Rule>,
-) -> Result<(Option<NodeFilter>, Option<NodeFilter>, Option<String>, String, Option<(u32, u32)>)> {
-    let mut src_node = None;
-    let mut dst_node = None;
-    let mut rel_var = None;
-    let mut rel_type = String::new();
-    let mut path_bounds = None;
+fn build_rel_pattern(pair: pest::iterators::Pair<Rule>) -> Result<RelPattern> {
+    let mut result = RelPattern {
+        src_node: None,
+        dst_node: None,
+        rel_var: None,
+        rel_type: String::new(),
+        path_bounds: None,
+    };
 
     for rel_inner in pair.into_inner() {
         match rel_inner.as_rule() {
             Rule::match_node_with_filter => {
                 let node_filter = build_node_filter_with_optional_props(rel_inner)?;
-                if src_node.is_none() {
-                    src_node = Some(node_filter);
+                if result.src_node.is_none() {
+                    result.src_node = Some(node_filter);
                 } else {
-                    dst_node = Some(node_filter);
+                    result.dst_node = Some(node_filter);
                 }
             }
             Rule::match_rel_type => {
                 for type_inner in rel_inner.into_inner() {
                     match type_inner.as_rule() {
                         Rule::identifier => {
-                            if rel_type.is_empty() {
-                                rel_type = type_inner.as_str().to_string();
+                            if result.rel_type.is_empty() {
+                                result.rel_type = type_inner.as_str().to_string();
                             } else {
-                                rel_var = Some(std::mem::take(&mut rel_type));
-                                rel_type = type_inner.as_str().to_string();
+                                result.rel_var = Some(std::mem::take(&mut result.rel_type));
+                                result.rel_type = type_inner.as_str().to_string();
                             }
                         }
                         Rule::path_length => {
-                            path_bounds = Some(build_path_length(type_inner)?);
+                            result.path_bounds = Some(build_path_length(type_inner)?);
                         }
                         _ => {}
                     }
@@ -462,7 +471,7 @@ fn build_rel_pattern(
         }
     }
 
-    Ok((src_node, dst_node, rel_var, rel_type, path_bounds))
+    Ok(result)
 }
 
 fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -497,12 +506,12 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 label = idents.next().unwrap().as_str().to_string();
             }
             Rule::match_rel_pattern => {
-                let result = build_rel_pattern(inner)?;
-                src_node = result.0;
-                dst_node = result.1;
-                rel_var = result.2;
-                rel_type = result.3;
-                path_bounds = result.4;
+                let rp = build_rel_pattern(inner)?;
+                src_node = rp.src_node;
+                dst_node = rp.dst_node;
+                rel_var = rp.rel_var;
+                rel_type = rp.rel_type;
+                path_bounds = rp.path_bounds;
             }
             Rule::where_clause => {
                 for where_inner in inner.into_inner() {
