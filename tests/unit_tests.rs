@@ -1550,6 +1550,37 @@ mod multi_page_foundation_tests {
         assert_eq!(result, data);
     }
 
+    // T054: Page-boundary edge cases — data exactly at 8KB (2 pages)
+    #[test]
+    fn test_multi_page_exact_two_page_boundary() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        // Data that exactly fills 2 pages: 8188 bytes data + 4 prefix = 8192
+        let data: Vec<u8> = (0..(2 * PAGE_SIZE - 4)).map(|i| (i % 251) as u8).collect();
+        let range = pool.allocate_page_range(2).unwrap();
+
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result.len(), data.len());
+        assert_eq!(result, data);
+    }
+
+    // T054: Data one byte over page boundary (spills to next page)
+    #[test]
+    fn test_multi_page_one_byte_over_boundary() {
+        let (pool, _tmp) = create_test_buffer_pool();
+
+        // 4093 bytes data + 4 prefix = 4097, needs 2 pages
+        let data: Vec<u8> = vec![0xCD; PAGE_SIZE - 3];
+        let range = pool.allocate_page_range(2).unwrap();
+
+        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+
+        assert_eq!(result, data);
+    }
+
     #[test]
     fn test_read_multi_page_empty_range_fails() {
         let (pool, _tmp) = create_test_buffer_pool();

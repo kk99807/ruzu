@@ -94,18 +94,18 @@
 
 ### Tests for User Story 2
 
-- [ ] T024 [P] [US2] Integration test: relationship data exceeding 4KB persists across close/reopen in tests/integration_tests.rs
-- [ ] T025 [P] [US2] Integration test: multiple rel tables with combined data > 4KB in tests/integration_tests.rs
-- [ ] T026 [P] [US2] Integration test: rel data grows beyond one page after CSV import in tests/integration_tests.rs
-- [ ] T027 [P] [US2] Contract test: rel data multi-page serialization format stability in tests/contract_tests.rs
+- [X] T024 [P] [US2] Integration test: relationship data exceeding 4KB persists across close/reopen in tests/integration_tests.rs
+- [X] T025 [P] [US2] Integration test: multiple rel tables with combined data > 4KB in tests/integration_tests.rs
+- [X] T026 [P] [US2] Integration test: rel data grows beyond one page after CSV import in tests/integration_tests.rs
+- [X] T027 [P] [US2] Contract test: rel data multi-page serialization format stability in tests/contract_tests.rs
 
 ### Implementation for User Story 2
 
-- [ ] T028 [US2] Modify `save_all_data()` in src/lib.rs to use `write_multi_page()` for rel table data with dynamic page allocation
-- [ ] T029 [US2] Modify `load_rel_table_data()` in src/lib.rs to use `read_multi_page()` for rel table data
-- [ ] T030 [US2] Update header `rel_metadata_range` in `save_all_data()` to reflect dynamically allocated rel data page range in src/lib.rs
-- [ ] T031 [US2] Remove the existing rel data size validation check (`rel_data_len > PAGE_SIZE - 4`) in src/lib.rs
-- [ ] T032 [US2] Verify all existing relationship-related tests still pass (cargo test)
+- [X] T028 [US2] Modify `save_all_data()` in src/lib.rs to use `write_multi_page()` for rel table data with dynamic page allocation
+- [X] T029 [US2] Modify `load_rel_table_data()` in src/lib.rs to use `read_multi_page()` for rel table data
+- [X] T030 [US2] Update header `rel_metadata_range` in `save_all_data()` to reflect dynamically allocated rel data page range in src/lib.rs
+- [X] T031 [US2] Remove the existing rel data size validation check (`rel_data_len > PAGE_SIZE - 4`) in src/lib.rs
+- [X] T032 [US2] Verify all existing relationship-related tests still pass (cargo test)
 
 **Checkpoint**: Relationship data multi-page storage works. Database can persist and reload > 4KB of rel data.
 
@@ -119,16 +119,16 @@
 
 ### Tests for User Story 3
 
-- [ ] T033 [P] [US3] Integration test: catalog data exceeding 4KB persists across close/reopen in tests/integration_tests.rs
-- [ ] T034 [P] [US3] Integration test: catalog grows beyond 4KB after new table creation in tests/integration_tests.rs
-- [ ] T035 [P] [US3] Contract test: catalog multi-page serialization format stability in tests/contract_tests.rs
+- [X] T033 [P] [US3] Integration test: catalog data exceeding 4KB persists across close/reopen in tests/integration_tests.rs
+- [X] T034 [P] [US3] Integration test: catalog grows beyond 4KB after new table creation in tests/integration_tests.rs
+- [X] T035 [P] [US3] Contract test: catalog multi-page serialization format stability in tests/contract_tests.rs
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] Modify `save_all_data()` in src/lib.rs to use `write_multi_page()` for catalog data with dynamic page allocation
-- [ ] T037 [US3] Modify catalog loading in src/lib.rs to use `read_multi_page()` for catalog data
-- [ ] T038 [US3] Update header `catalog_range` in `save_all_data()` to reflect dynamically allocated catalog page range in src/lib.rs
-- [ ] T039 [US3] Verify all existing catalog-related tests still pass (cargo test)
+- [X] T036 [US3] Modify `save_all_data()` in src/lib.rs to use `write_multi_page()` for catalog data with dynamic page allocation
+- [X] T037 [US3] Modify catalog loading in src/lib.rs to use `read_multi_page()` for catalog data
+- [X] T038 [US3] Update header `catalog_range` in `save_all_data()` to reflect dynamically allocated catalog page range in src/lib.rs
+- [X] T039 [US3] Verify all existing catalog-related tests still pass (cargo test)
 
 **Checkpoint**: All three metadata types (node, rel, catalog) now support multi-page storage.
 
@@ -142,17 +142,17 @@
 
 ### Tests for User Story 4
 
-- [ ] T040 [P] [US4] Integration test: v2 database with node and rel data opens correctly in updated system in tests/integration_tests.rs
-- [ ] T041 [P] [US4] Integration test: v2 database is re-saved as v3 format after first checkpoint in tests/integration_tests.rs
-- [ ] T042 [P] [US4] Integration test: v2 database with WAL replays correctly in updated system in tests/integration_tests.rs
-- [ ] T043 [P] [US4] Contract test: v2 header binary format is still correctly parseable in tests/contract_tests.rs
+- [X] T040 [P] [US4] Integration test: v2 database with node and rel data opens correctly in updated system in tests/integration_tests.rs
+- [X] T041 [P] [US4] Integration test: v2 database is re-saved as v3 format after first checkpoint in tests/integration_tests.rs
+- [X] T042 [P] [US4] Integration test: v2 database with WAL replays correctly in updated system in tests/integration_tests.rs
+- [X] T043 [P] [US4] Contract test: v2 header binary format is still correctly parseable in tests/contract_tests.rs
 
 ### Implementation for User Story 4
 
-- [ ] T044 [US4] Bump `CURRENT_VERSION` from 2 to 3 in src/storage/mod.rs
-- [ ] T045 [US4] Add v2-to-v3 migration path in `DatabaseHeader::deserialize_with_migration_flag()` in src/storage/mod.rs
-- [ ] T046 [US4] Ensure `Database::open()` sets dirty flag when v2 database is loaded so it re-saves as v3 on close in src/lib.rs (per Contract 7)
-- [ ] T047 [US4] Verify all existing tests still pass with version 3 header (cargo test)
+- [X] T044 [US4] Bump `CURRENT_VERSION` from 2 to 3 in src/storage/mod.rs
+- [X] T045 [US4] Add v2-to-v3 migration path in `DatabaseHeader::deserialize_with_migration_flag()` in src/storage/mod.rs
+- [X] T046 [US4] Ensure `Database::open()` sets dirty flag when v2 database is loaded so it re-saves as v3 on close in src/lib.rs (per Contract 7)
+- [X] T047 [US4] Verify all existing tests still pass with version 3 header (cargo test)
 
 **Checkpoint**: v2 databases seamlessly migrate to v3. No data loss, no manual steps.
 
@@ -166,15 +166,15 @@
 
 ### Tests for User Story 5
 
-- [ ] T048 [P] [US5] Integration test: WAL replay restores committed multi-page node data after crash in tests/integration_tests.rs
-- [ ] T049 [P] [US5] Integration test: WAL replay does NOT restore uncommitted multi-page data in tests/integration_tests.rs
-- [ ] T050 [P] [US5] Integration test: WAL replay restores committed multi-page rel data after crash in tests/integration_tests.rs
+- [X] T048 [P] [US5] Integration test: WAL replay restores committed multi-page node data after crash in tests/integration_tests.rs
+- [X] T049 [P] [US5] Integration test: WAL replay does NOT restore uncommitted multi-page data in tests/integration_tests.rs
+- [X] T050 [P] [US5] Integration test: WAL replay restores committed multi-page rel data after crash in tests/integration_tests.rs
 
 ### Implementation for User Story 5
 
-- [ ] T051 [US5] Verify `save_all_data()` multi-page writes occur before header update so crash safety is maintained in src/lib.rs
-- [ ] T052 [US5] Verify WAL checkpoint record is written after header flush to ensure atomicity in src/lib.rs
-- [ ] T053 [US5] Add page range bounds validation on load (`end_page <= file_page_count`) in src/lib.rs
+- [X] T051 [US5] Verify `save_all_data()` multi-page writes occur before header update so crash safety is maintained in src/lib.rs
+- [X] T052 [US5] Verify WAL checkpoint record is written after header flush to ensure atomicity in src/lib.rs
+- [X] T053 [US5] Add page range bounds validation on load (`end_page <= file_page_count`) in src/lib.rs
 
 **Checkpoint**: Crash recovery works with multi-page data. Committed transactions are always recoverable.
 
@@ -184,12 +184,12 @@
 
 **Purpose**: Improvements that affect multiple user stories, edge cases, and final validation.
 
-- [ ] T054 [P] Handle page-boundary edge cases: data exactly at 4KB, 8KB, etc. in tests/unit_tests.rs
-- [ ] T055 [P] Handle empty data case (0 bytes serialized) in write_multi_page/read_multi_page in src/lib.rs
-- [ ] T056 Run full test suite: `cargo test` — all 440+ existing tests must pass
-- [ ] T057 Run `cargo clippy` — zero warnings
-- [ ] T058 Run existing benchmarks (`cargo bench --bench storage_benchmark`, `cargo bench --bench rel_persist_benchmark`) — verify no > 2x regression
-- [ ] T059 Run quickstart.md verification checklist
+- [X] T054 [P] Handle page-boundary edge cases: data exactly at 4KB, 8KB, etc. in tests/unit_tests.rs
+- [X] T055 [P] Handle empty data case (0 bytes serialized) in write_multi_page/read_multi_page in src/lib.rs
+- [X] T056 Run full test suite: `cargo test` — all 440+ existing tests must pass
+- [X] T057 Run `cargo clippy` — zero warnings
+- [X] T058 Run existing benchmarks (`cargo bench --bench storage_benchmark`, `cargo bench --bench rel_persist_benchmark`) — verify no > 2x regression
+- [X] T059 Run quickstart.md verification checklist
 
 ---
 

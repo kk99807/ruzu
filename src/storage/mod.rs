@@ -37,7 +37,12 @@ use uuid::Uuid;
 pub const MAGIC_BYTES: &[u8; 8] = b"RUZUDB\0\0";
 
 /// Current database format version.
-pub const CURRENT_VERSION: u32 = 2;
+///
+/// Version history:
+/// - **Version 1**: Original format without `rel_metadata_range`.
+/// - **Version 2**: Adds `rel_metadata_range` for relationship persistence.
+/// - **Version 3**: Multi-page storage — page ranges may span > 1 page.
+pub const CURRENT_VERSION: u32 = 3;
 
 /// Range of pages in the database file.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,9 +108,8 @@ impl PageRange {
 /// all database metadata.  It stores:
 /// - **File format identification** via magic bytes (`RUZUDB\0\0`), allowing
 ///   tools to recognize a ruzu database file.
-/// - **Format version** for forward/backward compatibility.  Version 1
-///   databases (pre-relationship-persistence) are automatically migrated to
-///   version 2 on open via [`DatabaseHeader::from_v1`].
+/// - **Format version** for forward/backward compatibility.  Older version
+///   databases are automatically migrated to the current version on open.
 /// - **Unique database ID** (UUID v4) to distinguish databases and validate
 ///   WAL file association.
 /// - **Page ranges** locating the catalog (page 1), node table metadata
@@ -126,6 +130,7 @@ impl PageRange {
 ///
 /// - **Version 1**: Original format without `rel_metadata_range`.
 /// - **Version 2**: Adds `rel_metadata_range` for relationship persistence.
+/// - **Version 3**: Multi-page storage — page ranges may span > 1 page.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseHeader {
     /// Magic bytes for file identification.
@@ -135,8 +140,8 @@ pub struct DatabaseHeader {
 
     /// Database format version number.
     ///
-    /// Current version is 2.  Version 1 databases are migrated automatically
-    /// when opened (see [`DatabaseHeader::from_v1`]).
+    /// Current version is 3.  Older databases (v1, v2) are migrated automatically
+    /// when opened.
     pub version: u32,
 
     /// Unique identifier for this database instance.
@@ -298,17 +303,14 @@ impl DatabaseHeader {
 
     /// Deserializes a header from bytes.
     ///
-    /// This method automatically handles version migration. If the database is version 1
-    /// (missing the `rel_metadata_range` field), it will be automatically migrated to version 2.
-    ///
-    /// Returns a tuple of (header, was_migrated) where was_migrated is true if the database
-    /// was upgraded from version 1 to version 2.
+    /// This method automatically handles version migration. Older version databases
+    /// (v1, v2) are automatically migrated to the current version.
     ///
     /// # Errors
     ///
-    /// Returns an error if deserialization fails for both version 2 and version 1 formats.
+    /// Returns an error if deserialization fails.
     pub fn deserialize(data: &[u8]) -> crate::error::Result<Self> {
-        // Try to deserialize as version 2 (current format) first
+        // Try to deserialize as current format first
         match bincode::deserialize::<Self>(data) {
             Ok(header) => Ok(header),
             Err(_) => {
@@ -330,7 +332,7 @@ impl DatabaseHeader {
 
     /// Deserializes a header and reports if migration occurred.
     ///
-    /// Returns (header, was_migrated) where was_migrated is true if v1->v2 migration happened.
+    /// Returns (header, was_migrated) where was_migrated is true if any version migration happened.
     ///
     /// # Errors
     ///
@@ -347,22 +349,36 @@ impl DatabaseHeader {
         let version = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 
         if version == 1 {
-            // Deserialize as v1 and migrate
+            // Deserialize as v1 and migrate to current version
             let v1_header: DatabaseHeaderV1 = bincode::deserialize(data).map_err(|e| {
                 crate::error::RuzuError::StorageError(format!(
                     "Failed to deserialize v1 header: {e}"
                 ))
             })?;
 
-            // Migrate v1 to v2
-            let mut v2_header = Self::from_v1(v1_header);
-            v2_header.update_checksum();
-            Ok((v2_header, true)) // Migration occurred
+            // Migrate v1 → v2 → v3
+            let mut header = Self::from_v1(v1_header);
+            header.version = CURRENT_VERSION;
+            header.update_checksum();
+            Ok((header, true)) // Migration occurred
         } else if version == 2 {
-            // Deserialize as v2
-            let header = bincode::deserialize::<Self>(data).map_err(|e| {
+            // Deserialize as v2 and migrate to v3
+            // V2 binary format is identical to v3 (same struct layout),
+            // only the version field differs.
+            let mut header = bincode::deserialize::<Self>(data).map_err(|e| {
                 crate::error::RuzuError::StorageError(format!(
                     "Failed to deserialize v2 header: {e}"
+                ))
+            })?;
+            header.version = CURRENT_VERSION;
+            header.update_checksum();
+            Ok((header, true)) // Migration occurred (v2→v3)
+        } else if version == CURRENT_VERSION {
+            // Current version — no migration needed
+            let header = bincode::deserialize::<Self>(data).map_err(|e| {
+                crate::error::RuzuError::StorageError(format!(
+                    "Failed to deserialize v{} header: {e}",
+                    CURRENT_VERSION
                 ))
             })?;
             Ok((header, false)) // No migration needed
@@ -373,15 +389,15 @@ impl DatabaseHeader {
         }
     }
 
-    /// Migrates a version 1 header to version 2.
+    /// Migrates a version 1 header to the current version.
     ///
     /// Version 1 databases do not have the `rel_metadata_range` field.
-    /// This function creates a version 2 header with relationship metadata allocated at page 3.
+    /// This function creates a current-version header with relationship metadata allocated at page 3.
     #[must_use]
     pub fn from_v1(v1: DatabaseHeaderV1) -> Self {
         Self {
             magic: v1.magic,
-            version: 2,
+            version: CURRENT_VERSION,
             database_id: v1.database_id,
             catalog_range: v1.catalog_range,
             metadata_range: v1.metadata_range,

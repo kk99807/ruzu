@@ -445,16 +445,36 @@ impl Database {
 
         drop(header_handle);
 
-        // Read catalog from catalog pages
-        let catalog = if header.catalog_range.num_pages > 0 {
-            let catalog_page_id = PageId::new(0, header.catalog_range.start_page);
-            let catalog_handle = buffer_pool.pin(catalog_page_id)?;
-            let catalog_data = catalog_handle.data();
+        // T053: Validate page ranges are within file bounds
+        // Skip for migrated databases — v1 databases have rel_metadata_range pointing
+        // to page 3 which may not exist yet (will be created on first save).
+        if !was_migrated {
+            let file_page_count = buffer_pool.file_page_count();
+            for (name, range) in [
+                ("catalog", &header.catalog_range),
+                ("metadata", &header.metadata_range),
+                ("rel_metadata", &header.rel_metadata_range),
+            ] {
+                if range.num_pages > 0 {
+                    let end_page = range.start_page + range.num_pages;
+                    if end_page > file_page_count {
+                        return Err(RuzuError::StorageError(format!(
+                            "{} page range [{}, {}) exceeds file size ({} pages)",
+                            name, range.start_page, end_page, file_page_count
+                        )));
+                    }
+                }
+            }
+        }
 
-            // Read length prefix
-            let len = u32::from_le_bytes(catalog_data[0..4].try_into().unwrap()) as usize;
-            let catalog_bytes = &catalog_data[4..4 + len];
-            Catalog::deserialize(catalog_bytes)?
+        // T037: Read catalog from catalog pages using multi-page support
+        let catalog = if header.catalog_range.num_pages > 0 {
+            let catalog_bytes = read_multi_page(buffer_pool, &header.catalog_range)?;
+            if catalog_bytes.is_empty() {
+                Catalog::new()
+            } else {
+                Catalog::deserialize(&catalog_bytes)?
+            }
         } else {
             Catalog::new()
         };
@@ -534,14 +554,12 @@ impl Database {
         catalog: &Catalog,
         header: &DatabaseHeader,
     ) -> Result<HashMap<String, RelTable>> {
-        use storage::{PageId, RelTableData};
+        use storage::RelTableData;
 
         let mut rel_tables = HashMap::new();
 
-        // T018: Handle empty database case
+        // Handle empty database case (no rel metadata pages allocated)
         if header.rel_metadata_range.num_pages == 0 {
-            // No relationship metadata page allocated yet - return empty map
-            // Create empty tables for all relationship schemas
             for rel_name in catalog.rel_table_names() {
                 if let Some(schema) = catalog.get_rel_table(rel_name) {
                     let rel_table = RelTable::new(schema);
@@ -551,37 +569,21 @@ impl Database {
             return Ok(rel_tables);
         }
 
-        // Load relationship data from page 3
-        let rel_page_id = PageId::new(0, header.rel_metadata_range.start_page);
-        let rel_handle = buffer_pool.pin(rel_page_id)?;
-        let data = rel_handle.data();
+        // T029: Read rel table data using multi-page support
+        let rel_data_bytes = read_multi_page(buffer_pool, &header.rel_metadata_range)
+            .map_err(|e| RuzuError::RelTableLoadError(format!("Failed to read rel_table data: {}", e)))?;
 
-        // T019: Read and validate length prefix
-        let len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-        if len > PAGE_SIZE - 4 {
-            return Err(RuzuError::RelTableCorrupted(format!(
-                "Invalid rel_table metadata length: {} bytes (max {})",
-                len,
-                PAGE_SIZE - 4
-            )));
-        }
-
-        // T020: Deserialize relationship table data
-        if len > 0 {
-            let rel_data_bytes = &data[4..4 + len];
-
+        if !rel_data_bytes.is_empty() {
             let rel_data_map: HashMap<String, RelTableData> =
-                bincode::deserialize(rel_data_bytes).map_err(|e| {
+                bincode::deserialize(&rel_data_bytes).map_err(|e| {
                     RuzuError::RelTableLoadError(format!("Failed to deserialize rel_tables: {}", e))
                 })?;
 
-            // T021: Schema consistency validation & T022: Create RelTable instances
             for (table_name, rel_data) in rel_data_map {
                 if let Some(schema) = catalog.get_rel_table(&table_name) {
                     let rel_table = RelTable::from_data(schema, rel_data);
                     rel_tables.insert(table_name, rel_table);
                 } else {
-                    // Data exists but schema is missing - this is a corruption error
                     return Err(RuzuError::RelTableCorrupted(format!(
                         "Rel table '{}' has data but no schema in catalog",
                         table_name
@@ -605,7 +607,7 @@ impl Database {
 
     /// Saves all data (catalog and table data) to disk.
     fn save_all_data(&mut self) -> Result<()> {
-        use storage::{PageId, TableData};
+        use storage::TableData;
 
         let buffer_pool = self
             .buffer_pool
@@ -616,20 +618,32 @@ impl Database {
             .as_ref()
             .ok_or_else(|| RuzuError::StorageError("No header in in-memory mode".into()))?;
 
-        // Serialize catalog
+        // T036: Serialize catalog using multi-page support
         let catalog_bytes = self.catalog.serialize()?;
-        let catalog_len = catalog_bytes.len();
 
-        // Write catalog to page 1
-        if header.catalog_range.num_pages > 0 {
-            let catalog_page_id = PageId::new(0, header.catalog_range.start_page);
-            let mut catalog_handle = buffer_pool.pin(catalog_page_id)?;
+        let catalog_pages_needed = calculate_pages_needed(catalog_bytes.len());
+        let current_catalog_range = header.catalog_range;
 
-            // Write length prefix and data
-            let data = catalog_handle.data_mut();
-            data[0..4].copy_from_slice(&(catalog_len as u32).to_le_bytes());
-            data[4..4 + catalog_len].copy_from_slice(&catalog_bytes);
+        let catalog_data_range = if catalog_pages_needed <= current_catalog_range.num_pages {
+            // Reuse existing range (fits in already allocated pages)
+            current_catalog_range
+        } else {
+            // Allocate new contiguous range
+            buffer_pool.allocate_page_range(catalog_pages_needed)?
+        };
+
+        write_multi_page(buffer_pool, &catalog_data_range, &catalog_bytes)?;
+
+        // T038: Update header catalog_range to reflect the (possibly new) range
+        if let Some(ref mut header) = self.header {
+            header.catalog_range = catalog_data_range;
         }
+
+        // Re-borrow header after catalog range mutation
+        let header = self
+            .header
+            .as_ref()
+            .ok_or_else(|| RuzuError::StorageError("No header in in-memory mode".into()))?;
 
         // Serialize table data
         let mut table_data_map: HashMap<String, TableData> = HashMap::new();
@@ -665,7 +679,7 @@ impl Database {
             .as_ref()
             .ok_or_else(|| RuzuError::StorageError("No header in in-memory mode".into()))?;
 
-        // T024: Serialize relationship table data
+        // T028: Serialize relationship table data using multi-page support
         use storage::RelTableData;
         let mut rel_data_map: HashMap<String, RelTableData> = HashMap::new();
         for (table_name, rel_table) in &self.rel_tables {
@@ -674,25 +688,24 @@ impl Database {
 
         let rel_data_bytes = bincode::serialize(&rel_data_map)
             .map_err(|e| RuzuError::StorageError(format!("Failed to serialize rel_tables: {e}")))?;
-        let rel_data_len = rel_data_bytes.len();
 
-        // T026: Size validation
-        if rel_data_len > PAGE_SIZE - 4 {
-            return Err(RuzuError::StorageError(format!(
-                "Rel table metadata too large: {} bytes (max {})",
-                rel_data_len,
-                PAGE_SIZE - 4
-            )));
-        }
+        // T031: Size validation removed — multi-page allocation handles arbitrary sizes
+        let rel_pages_needed = calculate_pages_needed(rel_data_bytes.len());
+        let current_rel_range = header.rel_metadata_range;
 
-        // T025: Write rel_table data to page 3
-        if header.rel_metadata_range.num_pages > 0 {
-            let rel_page_id = PageId::new(0, header.rel_metadata_range.start_page);
-            let mut rel_handle = buffer_pool.pin(rel_page_id)?;
+        let rel_data_range = if rel_pages_needed <= current_rel_range.num_pages {
+            // Reuse existing range (fits in already allocated pages)
+            current_rel_range
+        } else {
+            // Allocate new contiguous range
+            buffer_pool.allocate_page_range(rel_pages_needed)?
+        };
 
-            let data = rel_handle.data_mut();
-            data[0..4].copy_from_slice(&(rel_data_len as u32).to_le_bytes());
-            data[4..4 + rel_data_len].copy_from_slice(&rel_data_bytes);
+        write_multi_page(buffer_pool, &rel_data_range, &rel_data_bytes)?;
+
+        // T030: Update header rel_metadata_range to reflect the (possibly new) range
+        if let Some(ref mut header) = self.header {
+            header.rel_metadata_range = rel_data_range;
         }
 
         Ok(())

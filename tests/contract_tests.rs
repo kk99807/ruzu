@@ -24,7 +24,7 @@ mod storage_format_contracts {
 
     #[test]
     fn test_header_version() {
-        assert_eq!(CURRENT_VERSION, 2); // Version 2 adds rel_metadata_range field
+        assert_eq!(CURRENT_VERSION, 3); // Version 3 adds multi-page storage support
     }
 
     #[test]
@@ -1575,7 +1575,7 @@ mod memory_contract_tests {
 
         // Verify all fields migrated correctly
         assert_eq!(v2_header.magic, *ruzu::storage::MAGIC_BYTES);
-        assert_eq!(v2_header.version, 2); // Version upgraded to 2
+        assert_eq!(v2_header.version, 3); // Version upgraded to current
         assert_eq!(v2_header.database_id, db_id);
         assert_eq!(v2_header.catalog_range.start_page, 1);
         assert_eq!(v2_header.catalog_range.num_pages, 1);
@@ -1616,6 +1616,79 @@ mod memory_contract_tests {
         assert_eq!(restored_v1.version, 1);
         assert_eq!(restored_v1.database_id, db_id);
         assert_eq!(restored_v1.checksum, 12345);
+    }
+
+    // -------------------------------------------------------------------------
+    // T043: v2 header binary format is still correctly parseable
+    // -------------------------------------------------------------------------
+
+    /// T043: Contract test that v2 header bytes can still be deserialized
+    /// after the codebase moves to v3 as CURRENT_VERSION.
+    #[test]
+    fn test_t043_v2_header_binary_format_parseable() {
+        use ruzu::storage::{DatabaseHeader, PageRange, MAGIC_BYTES};
+        use uuid::Uuid;
+
+        let db_id = Uuid::new_v4();
+
+        // Construct a v2 header manually and serialize it
+        let mut v2_header = DatabaseHeader {
+            magic: *MAGIC_BYTES,
+            version: 2,
+            database_id: db_id,
+            catalog_range: PageRange::new(1, 1),
+            metadata_range: PageRange::new(2, 1),
+            rel_metadata_range: PageRange::new(3, 1),
+            checksum: 0,
+        };
+        // Compute checksum with version=2
+        v2_header.checksum = v2_header.compute_checksum();
+        let v2_bytes = bincode::serialize(&v2_header).expect("serialize v2 header");
+
+        // Deserialize using deserialize_with_migration_flag (the load path)
+        let (header, was_migrated) =
+            DatabaseHeader::deserialize_with_migration_flag(&v2_bytes)
+                .expect("v2 header should be parseable");
+
+        // Should be recognized as v2 and migrated
+        assert!(was_migrated, "v2 header should trigger migration flag");
+        assert_eq!(header.version, 3, "Migrated header should be v3");
+        assert_eq!(header.database_id, db_id);
+        assert_eq!(header.catalog_range, PageRange::new(1, 1));
+        assert_eq!(header.metadata_range, PageRange::new(2, 1));
+        assert_eq!(header.rel_metadata_range, PageRange::new(3, 1));
+    }
+
+    /// T043 (additional): v2 header roundtrip: serialize v2 bytes → deserialize → get correct fields
+    #[test]
+    fn test_t043_v2_header_roundtrip_preserves_ranges() {
+        use ruzu::storage::{DatabaseHeader, PageRange, MAGIC_BYTES};
+        use uuid::Uuid;
+
+        let db_id = Uuid::new_v4();
+        let mut v2_header = DatabaseHeader {
+            magic: *MAGIC_BYTES,
+            version: 2,
+            database_id: db_id,
+            catalog_range: PageRange::new(1, 1),
+            metadata_range: PageRange::new(2, 1),
+            rel_metadata_range: PageRange::new(3, 1),
+            checksum: 0,
+        };
+        v2_header.checksum = v2_header.compute_checksum();
+        let v2_bytes = bincode::serialize(&v2_header).expect("serialize");
+
+        // Use the standard deserialize path
+        let restored = DatabaseHeader::deserialize(&v2_bytes)
+            .expect("v2 header should deserialize");
+
+        // The ranges should be preserved exactly
+        assert_eq!(restored.catalog_range.start_page, 1);
+        assert_eq!(restored.catalog_range.num_pages, 1);
+        assert_eq!(restored.metadata_range.start_page, 2);
+        assert_eq!(restored.metadata_range.num_pages, 1);
+        assert_eq!(restored.rel_metadata_range.start_page, 3);
+        assert_eq!(restored.rel_metadata_range.num_pages, 1);
     }
 }
 
@@ -2181,6 +2254,195 @@ mod multi_page_format_contracts {
                 num_rows,
                 "Second reopen must still have all {} rows",
                 num_rows
+            );
+        }
+    }
+
+    // =========================================================================
+    // T035: Catalog multi-page serialization format stability
+    // =========================================================================
+
+    /// Contract: Catalog data serialized via save_all_data() and loaded via
+    /// load_database() must round-trip correctly when catalog exceeds a single page.
+    ///
+    /// The format is:
+    /// - [4-byte LE length prefix][bincode-serialized Catalog]
+    /// - Data spans a contiguous PageRange allocated by the disk manager.
+    /// - The header's catalog_range field records the range used.
+    #[test]
+    fn test_t035_catalog_multipage_format_stability() {
+        use ruzu::{Database, DatabaseConfig};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        let num_tables = 25;
+        let cols_per_table = 8;
+
+        // Create database with large catalog (> 4KB)
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+
+            for t in 0..num_tables {
+                let cols: Vec<String> = (0..cols_per_table)
+                    .map(|c| format!("prop_{} STRING", c))
+                    .collect();
+                let col_defs = cols.join(", ");
+                db.execute(&format!(
+                    "CREATE NODE TABLE StableCatalog_{}(pk STRING, {}, PRIMARY KEY(pk))",
+                    t, col_defs
+                ))
+                .unwrap();
+            }
+
+            // Also add a relationship table to verify mixed catalog
+            db.execute(&format!(
+                "CREATE NODE TABLE Anchor(id INT64, PRIMARY KEY(id))"
+            ))
+            .unwrap();
+            db.execute(&format!(
+                "CREATE REL TABLE Link(FROM Anchor TO Anchor, weight INT64)"
+            ))
+            .unwrap();
+
+            db.close().unwrap();
+        }
+
+        // First reopen: verify all schemas are intact
+        {
+            let db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            for t in 0..num_tables {
+                let table_name = format!("StableCatalog_{}", t);
+                assert!(
+                    db.catalog().table_exists(&table_name),
+                    "Multi-page catalog must preserve table '{}'",
+                    table_name
+                );
+                let schema = db.catalog().get_table(&table_name).unwrap();
+                assert_eq!(
+                    schema.columns.len(),
+                    cols_per_table + 1,
+                    "Table '{}' must have {} columns",
+                    table_name,
+                    cols_per_table + 1
+                );
+            }
+            assert!(
+                db.catalog().table_exists("Anchor"),
+                "Anchor node table must exist"
+            );
+            assert!(
+                db.catalog().rel_table_exists("Link"),
+                "Link rel table must exist"
+            );
+        }
+
+        // Second reopen: verify no corruption from multiple open/close cycles
+        {
+            let db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            for t in 0..num_tables {
+                assert!(
+                    db.catalog().table_exists(&format!("StableCatalog_{}", t)),
+                    "Second reopen must still have all {} tables",
+                    num_tables
+                );
+            }
+        }
+    }
+
+    // T027: Rel data multi-page serialization format stability
+    // =========================================================================
+
+    /// Contract: Relationship table data serialized via save_all_data() and loaded via
+    /// load_rel_table_data() must round-trip correctly when data exceeds a single page.
+    ///
+    /// The format is:
+    /// - [4-byte LE length prefix][bincode-serialized HashMap<String, RelTableData>]
+    /// - Data spans a contiguous PageRange allocated by the disk manager.
+    /// - The header's rel_metadata_range field records the range used.
+    #[test]
+    fn test_t027_rel_data_multipage_format_stability() {
+        use ruzu::{Database, DatabaseConfig};
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test_db");
+
+        let num_persons = 40;
+        let num_rels = 150;
+
+        // Create database with > 4KB of relationship data
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            db.execute(
+                "CREATE NODE TABLE Person(id INT64, name STRING, PRIMARY KEY(id))",
+            )
+            .unwrap();
+            db.execute(
+                "CREATE REL TABLE Knows(FROM Person TO Person, since INT64, tag STRING)",
+            )
+            .unwrap();
+
+            for i in 0..num_persons {
+                db.execute(&format!(
+                    "CREATE (:Person {{id: {}, name: 'StableFormatPerson_{}'}})",
+                    i, i
+                ))
+                .unwrap();
+            }
+
+            for i in 0..num_rels {
+                let src = i % num_persons;
+                let dst = (i + 1) % num_persons;
+                db.execute(&format!(
+                    "MATCH (a:Person {{id: {}}}), (b:Person {{id: {}}}) CREATE (a)-[:Knows {{since: {}, tag: 'StableTag_{}'}}]->(b)",
+                    src, dst, 2000 + i, i
+                )).unwrap();
+            }
+            db.close().unwrap();
+        }
+
+        // Reopen and verify the data can be read back (format stability)
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute(
+                    "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a.id, b.id, r.since, r.tag",
+                )
+                .unwrap();
+            assert_eq!(
+                result.row_count(),
+                num_rels,
+                "Multi-page rel format must round-trip all {} relationships",
+                num_rels
+            );
+
+            // Verify deterministic data: first relationship (Person 0 -> Person 1)
+            let result = db
+                .execute(
+                    "MATCH (a:Person {id: 0})-[r:Knows]->(b:Person) RETURN b.id, r.since, r.tag",
+                )
+                .unwrap();
+            assert!(
+                result.row_count() > 0,
+                "Expected at least one relationship from Person 0"
+            );
+        }
+
+        // Reopen a second time to verify no corruption from multiple open/close cycles
+        {
+            let mut db = Database::open(&db_path, DatabaseConfig::default()).unwrap();
+            let result = db
+                .execute(
+                    "MATCH (a:Person)-[r:Knows]->(b:Person) RETURN a.id",
+                )
+                .unwrap();
+            assert_eq!(
+                result.row_count(),
+                num_rels,
+                "Second reopen must still have all {} relationships",
+                num_rels
             );
         }
     }

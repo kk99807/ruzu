@@ -217,6 +217,12 @@ impl BufferPool {
         dm.allocate_page_range(num_pages)
     }
 
+    /// Returns the total number of pages allocated in the database file.
+    #[must_use]
+    pub fn file_page_count(&self) -> u32 {
+        self.disk_manager.read().num_pages()
+    }
+
     /// Flushes a specific page to disk if it's dirty.
     ///
     /// # Errors
