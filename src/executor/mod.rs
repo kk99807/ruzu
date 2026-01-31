@@ -95,6 +95,10 @@ impl QueryExecutor {
     ///
     /// Configures the `DataFusion` session context with the specified batch size
     /// and memory limits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `DataFusion` runtime environment fails to build.
     #[must_use]
     pub fn new(config: ExecutorConfig) -> Self {
         // Configure DataFusion session with batch size

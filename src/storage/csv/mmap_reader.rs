@@ -117,6 +117,10 @@ impl MmapReader {
     /// # Errors
     ///
     /// Returns an error if reading the buffered content fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffered content is `None` after a successful read (unreachable).
     pub fn as_slice(&mut self) -> Result<&[u8], RuzuError> {
         match self {
             MmapReader::Mmap { mmap, .. } => Ok(&mmap[..]),

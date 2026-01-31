@@ -137,6 +137,10 @@ impl CsrNodeGroup {
     ///
     /// Returns an error if any CSR invariant is violated (offsets, monotonicity,
     /// or neighbor/rel-id array length mismatches).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the offsets array is non-empty but `last()` returns `None` (unreachable).
     pub fn validate(&self) -> Result<()> {
         // Invariant 1: offsets[0] == 0
         if self.offsets.is_empty() || self.offsets[0] != 0 {
@@ -190,6 +194,10 @@ impl CsrNodeGroup {
     ///
     /// This extends the offsets array and appends the edges.
     /// Nodes must be added in order (node 0, then 1, etc.).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `neighbors` and `rel_ids` have different lengths.
     pub fn add_node_edges(&mut self, neighbors: &[u64], rel_ids: &[u64]) {
         assert_eq!(
             neighbors.len(),
@@ -304,6 +312,11 @@ impl RelTable {
     }
 
     /// Creates a relationship table from serialized data.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if CSR invariants are violated (empty offsets,
+    /// mismatched neighbor/rel-id counts).
     #[must_use]
     pub fn from_data(schema: Arc<RelTableSchema>, data: RelTableData) -> Self {
         // Debug assertions for CSR invariants
