@@ -65,19 +65,25 @@ impl ExtendOperator {
     fn get_src_node_id(&self, row: &Row) -> Result<u64> {
         let id_col = format!("{}._id", self.src_variable);
         if let Some(Value::Int64(id)) = row.get(&id_col) {
-            return Ok(*id as u64);
+            return u64::try_from(*id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Negative node ID {id} for {id_col}"))
+            });
         }
 
         let id_col = format!("{}.id", self.src_variable);
         if let Some(Value::Int64(id)) = row.get(&id_col) {
-            return Ok(*id as u64);
+            return u64::try_from(*id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Negative node ID {id} for {id_col}"))
+            });
         }
 
         for (key, value) in row.iter() {
             #[allow(clippy::case_sensitive_file_extension_comparisons)]
             if key.starts_with(&self.src_variable) && key.ends_with(".id") {
                 if let Value::Int64(id) = value {
-                    return Ok(*id as u64);
+                    return u64::try_from(*id).map_err(|_| {
+                        RuzuError::ExecutionError(format!("Negative node ID {id} for {key}"))
+                    });
                 }
             }
         }

@@ -1398,12 +1398,13 @@ impl Database {
         }
 
         // Apply SKIP
-        let skip_count = skip.unwrap_or(0) as usize;
+        let skip_count = usize::try_from(skip.unwrap_or(0).max(0)).unwrap_or(0);
         let rows = rows.into_iter().skip(skip_count);
 
         // Apply LIMIT
         let rows: Vec<Row> = if let Some(limit_count) = limit {
-            rows.take(limit_count as usize).collect()
+            rows.take(usize::try_from(limit_count.max(0)).unwrap_or(0))
+                .collect()
         } else {
             rows.collect()
         };
@@ -1859,12 +1860,13 @@ impl Database {
         }
 
         // Apply SKIP
-        let skip_count = skip.unwrap_or(0) as usize;
+        let skip_count = usize::try_from(skip.unwrap_or(0).max(0)).unwrap_or(0);
         let rows = rows.into_iter().skip(skip_count);
 
         // Apply LIMIT
         let rows: Vec<Row> = if let Some(limit_count) = limit {
-            rows.take(limit_count as usize).collect()
+            rows.take(usize::try_from(limit_count.max(0)).unwrap_or(0))
+                .collect()
         } else {
             rows.collect()
         };
