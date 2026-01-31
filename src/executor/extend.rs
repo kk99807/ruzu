@@ -106,14 +106,20 @@ impl ExtendOperator {
         }
     }
 
-    fn create_output_row(&self, input_row: &Row, dst_node_id: u64, rel_id: u64) -> Row {
+    fn create_output_row(&self, input_row: &Row, dst_node_id: u64, rel_id: u64) -> Result<Row> {
         let mut output = input_row.clone();
         let dst_id_col = format!("{}._id", self.dst_variable);
-        output.insert(dst_id_col, Value::Int64(dst_node_id as i64));
+        let dst_id_i64 = i64::try_from(dst_node_id).map_err(|_| {
+            RuzuError::ExecutionError(format!("Node ID {dst_node_id} exceeds i64 range"))
+        })?;
+        output.insert(dst_id_col, Value::Int64(dst_id_i64));
 
         if let Some(ref rel_var) = self.rel_variable {
             let rel_id_col = format!("{rel_var}._id");
-            output.insert(rel_id_col, Value::Int64(rel_id as i64));
+            let rel_id_i64 = i64::try_from(rel_id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Rel ID {rel_id} exceeds i64 range"))
+            })?;
+            output.insert(rel_id_col, Value::Int64(rel_id_i64));
 
             if let Some(props) = self.rel_table.get_properties(rel_id) {
                 for (idx, col) in self.rel_schema.columns.iter().enumerate() {
@@ -124,7 +130,7 @@ impl ExtendOperator {
                 }
             }
         }
-        output
+        Ok(output)
     }
 }
 
@@ -136,7 +142,7 @@ impl PhysicalOperator for ExtendOperator {
                 self.edge_index += 1;
 
                 if let Some(ref input_row) = self.current_input_row {
-                    return Ok(Some(self.create_output_row(input_row, dst_node_id, rel_id)));
+                    return Ok(Some(self.create_output_row(input_row, dst_node_id, rel_id)?));
                 }
             }
 

@@ -368,9 +368,12 @@ impl QueryResult {
         let mut row = Row::new();
         row.set(
             "rows_imported".to_string(),
-            Value::Int64(rows_imported as i64),
+            Value::Int64(i64::try_from(rows_imported).unwrap_or(i64::MAX)),
         );
-        row.set("rows_failed".to_string(), Value::Int64(rows_failed as i64));
+        row.set(
+            "rows_failed".to_string(),
+            Value::Int64(i64::try_from(rows_failed).unwrap_or(i64::MAX)),
+        );
         result.add_row(row);
         result
     }

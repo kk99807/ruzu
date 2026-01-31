@@ -521,7 +521,9 @@ pub fn estimate_row_offsets(
                 u64::from(config.has_header) // Start after header
             } else {
                 #[allow(clippy::cast_precision_loss)]
-                let estimate = (block.start_offset as f64 / avg_bytes_per_row) as u64;
+                let estimate_f64 = (block.start_offset as f64 / avg_bytes_per_row).max(0.0);
+                #[allow(clippy::cast_sign_loss)] // Clamped to non-negative above
+                let estimate = estimate_f64 as u64;
                 estimate
             }
         })

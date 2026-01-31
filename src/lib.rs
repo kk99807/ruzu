@@ -1260,7 +1260,7 @@ impl Database {
                             AstAggregateFunction::Count => {
                                 if agg.input.is_none() {
                                     // COUNT(*)
-                                    Value::Int64(rows.len() as i64)
+                                    Value::Int64(i64::try_from(rows.len()).unwrap_or(i64::MAX))
                                 } else {
                                     // COUNT(property) - count non-null values
                                     let (v, p) = agg.input.as_ref().unwrap();
@@ -1268,7 +1268,7 @@ impl Database {
                                     let count = rows.iter()
                                         .filter(|r| r.get(&prop_name).is_some() && !matches!(r.get(&prop_name), Some(Value::Null)))
                                         .count();
-                                    Value::Int64(count as i64)
+                                    Value::Int64(i64::try_from(count).unwrap_or(i64::MAX))
                                 }
                             }
                             AstAggregateFunction::Sum => {
