@@ -152,6 +152,14 @@ cargo bench --bench e2e_benchmark      # End-to-end queries
 
 ## Development
 
+### Setup
+
+After cloning, enable the pre-commit hook that blocks commits with clippy warnings:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 This project uses [SpecKit](https://github.com/cased/speckit) for structured development workflow:
 
 - **Constitution**: See [.specify/memory/constitution.md](.specify/memory/constitution.md) for development principles

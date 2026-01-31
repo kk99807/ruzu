@@ -1,0 +1,36 @@
+#!/bin/sh
+# Pre-commit hook: block commits with clippy warnings.
+# Per constitution §IV, clippy must pass with zero warnings.
+# Checks lib and bin targets (not tests/benches which have pre-existing warnings).
+
+echo "Running cargo clippy..."
+output=$(cargo clippy --lib --bins 2>&1)
+status=$?
+
+# Check for warnings in the output (clippy exits 0 even with warnings)
+if echo "$output" | grep -q "^warning\b"; then
+    echo ""
+    echo "============================================"
+    echo "COMMIT BLOCKED: clippy warnings detected"
+    echo "============================================"
+    echo ""
+    echo "$output" | grep "^warning"
+    echo ""
+    echo "Fix all warnings before committing."
+    echo "Fixes should be as narrow as possible —"
+    echo "use #[allow(...)] on the specific item, not"
+    echo "at module/crate level, unless approved."
+    exit 1
+fi
+
+if [ $status -ne 0 ]; then
+    echo ""
+    echo "============================================"
+    echo "COMMIT BLOCKED: cargo clippy failed"
+    echo "============================================"
+    echo ""
+    echo "$output"
+    exit 1
+fi
+
+echo "clippy passed — no warnings."
