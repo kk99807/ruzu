@@ -73,6 +73,48 @@ impl CsrNodeGroup {
         }
     }
 
+    /// Asserts CSR invariants in debug builds.
+    ///
+    /// Validates that offsets are non-empty, monotonically non-decreasing,
+    /// and that neighbors/rel_ids lengths match the total edge count.
+    #[cfg(debug_assertions)]
+    fn debug_assert_invariants(&self, direction: &str) {
+        debug_assert!(
+            !self.offsets.is_empty(),
+            "CSR group offsets cannot be empty"
+        );
+        debug_assert!(
+            self.offsets.len() >= 2,
+            "CSR group should have at least 2 offsets (for num_nodes = 1), got {}",
+            self.offsets.len()
+        );
+        let num_nodes = self.offsets.len() - 1;
+        let total_edges = self.offsets.last().unwrap() - self.offsets[0];
+        debug_assert_eq!(
+            self.neighbors.len(),
+            total_edges as usize,
+            "{direction} CSR group {}: neighbors.len() ({}) != total edges ({total_edges})",
+            self.group_id,
+            self.neighbors.len(),
+        );
+        debug_assert_eq!(
+            self.rel_ids.len(),
+            total_edges as usize,
+            "{direction} CSR group {}: rel_ids.len() ({}) != total edges ({total_edges})",
+            self.group_id,
+            self.rel_ids.len(),
+        );
+        for i in 0..num_nodes {
+            debug_assert!(
+                self.offsets[i] <= self.offsets[i + 1],
+                "{direction} CSR group {}: offsets not monotonic at {i}: {} > {}",
+                self.group_id,
+                self.offsets[i],
+                self.offsets[i + 1]
+            );
+        }
+    }
+
     /// Creates a CSR node group with preallocated capacity.
     #[must_use]
     pub fn with_capacity(group_id: u32, num_nodes: u32, estimated_edges: usize) -> Self {
@@ -322,93 +364,12 @@ impl RelTable {
         // Debug assertions for CSR invariants
         #[cfg(debug_assertions)]
         {
-            // Validate forward CSR groups
             for group in &data.forward_groups {
-                debug_assert!(
-                    !group.offsets.is_empty(),
-                    "CSR group offsets cannot be empty"
-                );
-                debug_assert!(
-                    group.offsets.len() >= 2,
-                    "CSR group should have at least 2 offsets (for num_nodes = 1), got {}",
-                    group.offsets.len()
-                );
-                // Validate offsets.len() == num_nodes + 1
-                let num_nodes = group.offsets.len() - 1;
-                let total_edges = group.offsets.last().unwrap() - group.offsets[0];
-                debug_assert_eq!(
-                    group.neighbors.len(),
-                    total_edges as usize,
-                    "Forward CSR group {}: neighbors.len() ({}) != total edges ({})",
-                    group.group_id,
-                    group.neighbors.len(),
-                    total_edges
-                );
-                debug_assert_eq!(
-                    group.rel_ids.len(),
-                    total_edges as usize,
-                    "Forward CSR group {}: rel_ids.len() ({}) != total edges ({})",
-                    group.group_id,
-                    group.rel_ids.len(),
-                    total_edges
-                );
-                // Validate offsets are monotonically non-decreasing
-                for i in 0..num_nodes {
-                    debug_assert!(
-                        group.offsets[i] <= group.offsets[i + 1],
-                        "Forward CSR group {}: offsets not monotonic at {}: {} > {}",
-                        group.group_id,
-                        i,
-                        group.offsets[i],
-                        group.offsets[i + 1]
-                    );
-                }
+                group.debug_assert_invariants("Forward");
             }
-
-            // Validate backward CSR groups
             for group in &data.backward_groups {
-                debug_assert!(
-                    !group.offsets.is_empty(),
-                    "CSR group offsets cannot be empty"
-                );
-                debug_assert!(
-                    group.offsets.len() >= 2,
-                    "CSR group should have at least 2 offsets (for num_nodes = 1), got {}",
-                    group.offsets.len()
-                );
-                // Validate offsets.len() == num_nodes + 1
-                let num_nodes = group.offsets.len() - 1;
-                let total_edges = group.offsets.last().unwrap() - group.offsets[0];
-                debug_assert_eq!(
-                    group.neighbors.len(),
-                    total_edges as usize,
-                    "Backward CSR group {}: neighbors.len() ({}) != total edges ({})",
-                    group.group_id,
-                    group.neighbors.len(),
-                    total_edges
-                );
-                debug_assert_eq!(
-                    group.rel_ids.len(),
-                    total_edges as usize,
-                    "Backward CSR group {}: rel_ids.len() ({}) != total edges ({})",
-                    group.group_id,
-                    group.rel_ids.len(),
-                    total_edges
-                );
-                // Validate offsets are monotonically non-decreasing
-                for i in 0..num_nodes {
-                    debug_assert!(
-                        group.offsets[i] <= group.offsets[i + 1],
-                        "Backward CSR group {}: offsets not monotonic at {}: {} > {}",
-                        group.group_id,
-                        i,
-                        group.offsets[i],
-                        group.offsets[i + 1]
-                    );
-                }
+                group.debug_assert_invariants("Backward");
             }
-
-            // Validate next_rel_id is greater than all existing rel_ids
             for &rel_id in data.properties.keys() {
                 debug_assert!(
                     rel_id < data.next_rel_id,
