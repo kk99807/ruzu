@@ -1,4 +1,4 @@
-//! Vectorized batch wrapper around Arrow RecordBatch.
+//! Vectorized batch wrapper around Arrow `RecordBatch`.
 
 use arrow::array::{Array, ArrayRef, UInt32Array};
 use arrow::datatypes::SchemaRef;
@@ -7,17 +7,17 @@ use arrow::record_batch::RecordBatch;
 /// Default batch size for vectorized execution (rows per batch).
 pub const DEFAULT_BATCH_SIZE: usize = 2048;
 
-/// Wrapper around Arrow RecordBatch with optional selection vector.
+/// Wrapper around Arrow `RecordBatch` with optional selection vector.
 #[derive(Debug, Clone)]
 pub struct VectorizedBatch {
-    /// The underlying Arrow RecordBatch.
+    /// The underlying Arrow `RecordBatch`.
     batch: RecordBatch,
     /// Optional selection vector for filtered rows.
     selection: Option<SelectionVector>,
 }
 
 impl VectorizedBatch {
-    /// Creates a new vectorized batch from a RecordBatch.
+    /// Creates a new vectorized batch from a `RecordBatch`.
     pub fn new(batch: RecordBatch) -> Self {
         VectorizedBatch {
             batch,
@@ -33,7 +33,7 @@ impl VectorizedBatch {
         }
     }
 
-    /// Returns the underlying RecordBatch.
+    /// Returns the underlying `RecordBatch`.
     #[must_use]
     pub fn batch(&self) -> &RecordBatch {
         &self.batch

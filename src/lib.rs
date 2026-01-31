@@ -1,6 +1,6 @@
 //! ruzu - Rust Graph Database
 //!
-//! Phase 2: Query engine with DataFusion integration.
+//! Phase 2: Query engine with `DataFusion` integration.
 
 pub mod binder;
 pub mod catalog;
@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 /// Calculates the number of pages needed to store data with a 4-byte length prefix.
 ///
-/// Formula: ceil((data_len + 4) / PAGE_SIZE)
+/// Formula: `ceil((data_len + 4) / PAGE_SIZE)`
 /// Minimum: 1 page (even for empty data, to store the length prefix).
 #[must_use]
 pub fn calculate_pages_needed(data_len: usize) -> u32 {
@@ -424,7 +424,7 @@ impl Database {
 
     /// Loads the database header and catalog from disk.
     ///
-    /// Returns (catalog, header, was_migrated) where was_migrated is true if the database
+    /// Returns (catalog, header, `was_migrated`) where `was_migrated` is true if the database
     /// was upgraded from version 1 to version 2.
     fn load_database(buffer_pool: &BufferPool) -> Result<(Catalog, DatabaseHeader, bool)> {
         use storage::PageId;

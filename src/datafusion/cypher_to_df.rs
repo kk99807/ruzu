@@ -1,4 +1,4 @@
-//! Conversion from Cypher bound expressions to DataFusion physical expressions.
+//! Conversion from Cypher bound expressions to `DataFusion` physical expressions.
 
 use std::sync::Arc;
 
@@ -12,11 +12,11 @@ use datafusion::physical_expr::PhysicalExpr;
 use crate::binder::{ArithmeticOp, BoundExpression, ComparisonOp, LogicalOp};
 use crate::types::Value;
 
-/// Converter from Cypher expressions to DataFusion physical expressions.
+/// Converter from Cypher expressions to `DataFusion` physical expressions.
 pub struct CypherToDf;
 
 impl CypherToDf {
-    /// Converts a bound expression to a DataFusion physical expression.
+    /// Converts a bound expression to a `DataFusion` physical expression.
     pub fn to_physical_expr(
         expr: &BoundExpression,
         schema: &Schema,
@@ -77,7 +77,7 @@ impl CypherToDf {
         }
     }
 
-    /// Converts a ruzu Value to a DataFusion scalar literal.
+    /// Converts a ruzu Value to a `DataFusion` scalar literal.
     fn value_to_scalar(value: &Value) -> Arc<dyn PhysicalExpr> {
         match value {
             Value::Int64(v) => lit(ScalarValue::Int64(Some(*v))),
@@ -91,7 +91,7 @@ impl CypherToDf {
         }
     }
 
-    /// Converts a comparison operator to DataFusion operator.
+    /// Converts a comparison operator to `DataFusion` operator.
     fn comparison_to_df_op(op: ComparisonOp) -> Operator {
         match op {
             ComparisonOp::Eq => Operator::Eq,
@@ -103,7 +103,7 @@ impl CypherToDf {
         }
     }
 
-    /// Converts an arithmetic operator to DataFusion operator.
+    /// Converts an arithmetic operator to `DataFusion` operator.
     fn arithmetic_to_df_op(op: ArithmeticOp) -> Operator {
         match op {
             ArithmeticOp::Add => Operator::Plus,

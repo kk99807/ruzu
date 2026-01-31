@@ -83,7 +83,7 @@ impl PageRange {
 
     /// Returns true if this range shares any pages with `other`.
     ///
-    /// Empty ranges (num_pages == 0) never overlap with anything.
+    /// Empty ranges (`num_pages` == 0) never overlap with anything.
     #[must_use]
     pub const fn overlaps(&self, other: &PageRange) -> bool {
         if self.num_pages == 0 || other.num_pages == 0 {
@@ -332,7 +332,7 @@ impl DatabaseHeader {
 
     /// Deserializes a header and reports if migration occurred.
     ///
-    /// Returns (header, was_migrated) where was_migrated is true if any version migration happened.
+    /// Returns (header, `was_migrated`) where `was_migrated` is true if any version migration happened.
     ///
     /// # Errors
     ///

@@ -123,7 +123,7 @@ impl ParsedBatch {
 /// Collects errors from multiple threads.
 #[derive(Debug, Default)]
 pub struct ThreadLocalErrors {
-    /// Errors indexed by block_idx.
+    /// Errors indexed by `block_idx`.
     errors_by_block: Arc<Mutex<HashMap<usize, Vec<ImportError>>>>,
 }
 

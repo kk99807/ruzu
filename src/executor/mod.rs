@@ -86,14 +86,14 @@ impl ExecutorConfig {
 pub struct QueryExecutor {
     /// Executor configuration.
     config: ExecutorConfig,
-    /// DataFusion session context.
+    /// `DataFusion` session context.
     session_ctx: SessionContext,
 }
 
 impl QueryExecutor {
     /// Creates a new query executor with the given configuration.
     ///
-    /// Configures the DataFusion session context with the specified batch size
+    /// Configures the `DataFusion` session context with the specified batch size
     /// and memory limits.
     #[must_use]
     pub fn new(config: ExecutorConfig) -> Self {
@@ -207,7 +207,7 @@ impl QueryExecutor {
             .map_err(|e| RuzuError::ExecutionError(e.to_string()))
     }
 
-    /// Converts a logical plan to a DataFusion physical plan.
+    /// Converts a logical plan to a `DataFusion` physical plan.
     fn to_physical_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
         // For now, create a simple placeholder physical plan
         // This will be expanded in the User Story phases

@@ -63,7 +63,7 @@ pub enum ConstantValue {
     Unknown,
 }
 
-/// Tries to evaluate a BoundExpression to a constant boolean value.
+/// Tries to evaluate a `BoundExpression` to a constant boolean value.
 fn try_evaluate_constant(expr: &BoundExpression) -> ConstantValue {
     match expr {
         BoundExpression::Literal { value, .. } => match value {
@@ -239,7 +239,7 @@ fn simplify_predicate(expr: &BoundExpression) -> BoundExpression {
 
 /// Predicate simplification rule.
 ///
-/// Simplifies constant expressions like WHERE 1=0 → EmptyResult.
+/// Simplifies constant expressions like WHERE 1=0 → `EmptyResult`.
 pub struct PredicateSimplificationRule;
 
 impl OptimizerRule for PredicateSimplificationRule {

@@ -65,7 +65,7 @@ pub enum LogicalPlan {
     /// Project columns/expressions.
     Project {
         input: Box<LogicalPlan>,
-        /// (output_name, expression).
+        /// (`output_name`, expression).
         expressions: Vec<(String, BoundExpression)>,
     },
 

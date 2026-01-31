@@ -611,7 +611,7 @@ impl RelTable {
     ///
     /// # Arguments
     ///
-    /// * `relationships` - Vector of (src_node_id, dst_node_id, properties) tuples
+    /// * `relationships` - Vector of (`src_node_id`, `dst_node_id`, properties) tuples
     ///
     /// # Returns
     ///

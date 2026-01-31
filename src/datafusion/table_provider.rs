@@ -1,4 +1,4 @@
-//! TableProvider implementations for ruzu storage.
+//! `TableProvider` implementations for ruzu storage.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use crate::catalog::NodeTableSchema;
 use crate::storage::NodeTable;
 use crate::types::DataType;
 
-/// TableProvider implementation for NodeTable.
+/// `TableProvider` implementation for `NodeTable`.
 #[derive(Debug)]
 pub struct NodeTableProvider {
     /// Reference to the underlying node table.
@@ -95,7 +95,7 @@ impl TableProvider for NodeTableProvider {
     }
 }
 
-/// TableProvider implementation for relationship tables.
+/// `TableProvider` implementation for relationship tables.
 #[derive(Debug)]
 pub struct RelTableProvider {
     /// Arrow schema for this table.
@@ -136,7 +136,7 @@ impl TableProvider for RelTableProvider {
     }
 }
 
-/// Converts a ruzu NodeTableSchema to an Arrow Schema.
+/// Converts a ruzu `NodeTableSchema` to an Arrow Schema.
 fn node_schema_to_arrow(schema: &NodeTableSchema) -> Schema {
     let fields: Vec<Field> = schema
         .columns
@@ -150,7 +150,7 @@ fn node_schema_to_arrow(schema: &NodeTableSchema) -> Schema {
     Schema::new(fields)
 }
 
-/// Converts a ruzu DataType to an Arrow DataType.
+/// Converts a ruzu `DataType` to an Arrow `DataType`.
 pub fn datatype_to_arrow(dt: DataType) -> ArrowDataType {
     match dt {
         DataType::Int64 => ArrowDataType::Int64,
@@ -163,7 +163,7 @@ pub fn datatype_to_arrow(dt: DataType) -> ArrowDataType {
     }
 }
 
-/// Converts an Arrow DataType to a ruzu DataType.
+/// Converts an Arrow `DataType` to a ruzu `DataType`.
 pub fn arrow_to_datatype(dt: &ArrowDataType) -> Option<DataType> {
     match dt {
         ArrowDataType::Int64 => Some(DataType::Int64),

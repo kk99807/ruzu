@@ -32,7 +32,7 @@ pub struct ExtendOperator {
     current_input_row: Option<Row>,
     /// Current edges for the current input row.
     current_edges: Vec<(u64, u64)>,
-    /// Index into current_edges.
+    /// Index into `current_edges`.
     edge_index: usize,
 }
 
