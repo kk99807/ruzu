@@ -1057,6 +1057,7 @@ impl Database {
         for (name, literal) in &properties {
             let value = literal_to_value(literal);
             // Promote Int64 to Float64 if the column type is FLOAT64
+            #[allow(clippy::cast_precision_loss)]
             let value = if let Value::Int64(n) = &value {
                 if let Some(col) = schema.columns.iter().find(|c| c.name == *name) {
                     if col.data_type == DataType::Float64 {
@@ -1261,7 +1262,9 @@ impl Database {
                                     Value::Null
                                 } else {
                                     let sum: i64 = values.iter().sum();
-                                    Value::Float64(sum as f64 / values.len() as f64)
+                                    #[allow(clippy::cast_precision_loss)]
+                                    let avg = sum as f64 / values.len() as f64;
+                                    Value::Float64(avg)
                                 }
                             }
                             AstAggregateFunction::Min => {
@@ -2143,6 +2146,7 @@ impl Database {
 
 /// Promotes values for cross-type comparison (Int64 vs Float64).
 /// Returns the pair with appropriate type promotion applied.
+#[allow(clippy::cast_precision_loss)]
 fn promote_for_comparison(a: Value, b: Value) -> (Value, Value) {
     match (&a, &b) {
         (Value::Int64(n), Value::Float64(_)) => (Value::Float64(*n as f64), b),

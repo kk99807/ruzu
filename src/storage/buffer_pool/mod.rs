@@ -457,6 +457,7 @@ impl BufferPoolStats {
     ///
     /// Returns `None` if there have been no cache accesses.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn hit_rate(&self) -> Option<f64> {
         let total = self.cache_hits + self.cache_misses;
         if total == 0 {

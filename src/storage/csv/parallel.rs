@@ -503,6 +503,7 @@ pub fn estimate_row_offsets(
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
     let avg_bytes_per_row = if line_count > 0 {
         sample.len() as f64 / line_count as f64
     } else {
@@ -519,7 +520,9 @@ pub fn estimate_row_offsets(
                     0
                 } // Start after header
             } else {
-                (block.start_offset as f64 / avg_bytes_per_row) as u64
+                #[allow(clippy::cast_precision_loss)]
+                let estimate = (block.start_offset as f64 / avg_bytes_per_row) as u64;
+                estimate
             }
         })
         .collect()

@@ -254,6 +254,7 @@ pub trait PhysicalOperator {
 }
 
 /// Promotes values for cross-type comparison (Int64 vs Float64).
+#[allow(clippy::cast_precision_loss)]
 fn promote_for_comparison(a: Value, b: Value) -> (Value, Value) {
     match (&a, &b) {
         (Value::Int64(n), Value::Float64(_)) => (Value::Float64(*n as f64), b),

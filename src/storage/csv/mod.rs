@@ -328,6 +328,7 @@ impl ImportProgress {
 
     /// Returns the completion percentage (0.0 to 1.0).
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn percent_complete(&self) -> Option<f64> {
         self.rows_total.map(|total| {
             if total == 0 {
@@ -387,6 +388,7 @@ impl ImportProgress {
             if elapsed > 0.001 {
                 // Only sample if at least 1ms has passed
                 let rows_delta = self.rows_processed - self.last_row_count;
+                #[allow(clippy::cast_precision_loss)]
                 let sample = rows_delta as f64 / elapsed;
                 self.throughput_samples.push(sample);
                 // Keep only last 10 samples
@@ -402,6 +404,7 @@ impl ImportProgress {
 
     /// Returns the overall throughput in rows/second.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn throughput(&self) -> Option<f64> {
         let elapsed = self.start_time?.elapsed().as_secs_f64();
         if elapsed > 0.0 {
@@ -432,6 +435,7 @@ impl ImportProgress {
 
     /// Returns the estimated time remaining in seconds.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn eta_seconds(&self) -> Option<f64> {
         let remaining = self.rows_total?.saturating_sub(self.rows_processed);
         let throughput = self.smoothed_throughput()?;
