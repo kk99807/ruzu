@@ -1,5 +1,7 @@
 //! Physical plan mapping from logical to physical operators.
 
+use std::fmt::Write;
+
 use crate::binder::Direction;
 use crate::catalog::Catalog;
 
@@ -31,10 +33,10 @@ impl<'a> PlanMapper<'a> {
             LogicalPlan::NodeScan { table_name, variable, pushed_filters, projection, .. } => {
                 let mut desc = format!("{prefix}NodeScan [{table_name} as {variable}]");
                 if !pushed_filters.is_empty() {
-                    desc.push_str(&format!(" filters={}", pushed_filters.len()));
+                    let _ = write!(desc, " filters={}", pushed_filters.len());
                 }
                 if let Some(proj) = projection {
-                    desc.push_str(&format!(" projection={proj:?}"));
+                    let _ = write!(desc, " projection={proj:?}");
                 }
                 desc
             }

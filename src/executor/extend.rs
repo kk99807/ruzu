@@ -74,6 +74,7 @@ impl ExtendOperator {
         }
 
         for (key, value) in row.iter() {
+            #[allow(clippy::case_sensitive_file_extension_comparisons)]
             if key.starts_with(&self.src_variable) && key.ends_with(".id") {
                 if let Value::Int64(id) = value {
                     return Ok(*id as u64);

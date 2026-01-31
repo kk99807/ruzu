@@ -14,6 +14,8 @@ pub use optimizer::{
 };
 pub use physical_plan::PlanMapper;
 
+use std::fmt::Write;
+
 use crate::binder::{BoundQuery, QueryGraph};
 use crate::catalog::Catalog;
 use crate::error::{Result, RuzuError};
@@ -98,6 +100,7 @@ impl<'a> Planner<'a> {
     }
 
     /// Plans the query graph (MATCH pattern).
+    #[allow(clippy::unused_self)]
     fn plan_query_graph(&self, graph: &QueryGraph) -> Result<LogicalPlan> {
         if graph.nodes.is_empty() {
             return Err(RuzuError::PlanError("Empty query graph".into()));
@@ -191,11 +194,11 @@ impl<'a> Planner<'a> {
         let mut output = String::new();
 
         output.push_str("=== Logical Plan ===\n");
-        output.push_str(&format!("{plan}"));
+        let _ = write!(output, "{plan}");
 
         output.push_str("\n=== Output Schema ===\n");
         for (name, dtype) in plan.output_schema() {
-            output.push_str(&format!("  {name} : {dtype:?}\n"));
+            let _ = writeln!(output, "  {name} : {dtype:?}");
         }
 
         output

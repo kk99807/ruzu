@@ -212,6 +212,7 @@ impl QueryExecutor {
     }
 
     /// Converts a logical plan to a `DataFusion` physical plan.
+    #[allow(clippy::unused_self)]
     fn to_physical_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
         // For now, create a simple placeholder physical plan
         // This will be expanded in the User Story phases

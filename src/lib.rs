@@ -46,7 +46,7 @@ pub fn calculate_pages_needed(data_len: usize) -> u32 {
 /// Format: [4-byte length prefix (u32 LE)] [data bytes spanning pages]
 fn write_multi_page(
     buffer_pool: &BufferPool,
-    range: &PageRange,
+    range: PageRange,
     data: &[u8],
 ) -> Result<()> {
     use storage::PageId;
@@ -99,7 +99,7 @@ fn write_multi_page(
 /// the data bytes from all pages in the range.
 fn read_multi_page(
     buffer_pool: &BufferPool,
-    range: &PageRange,
+    range: PageRange,
 ) -> Result<Vec<u8>> {
     use storage::PageId;
 
@@ -468,7 +468,7 @@ impl Database {
 
         // T037: Read catalog from catalog pages using multi-page support
         let catalog = if header.catalog_range.num_pages > 0 {
-            let catalog_bytes = read_multi_page(buffer_pool, &header.catalog_range)?;
+            let catalog_bytes = read_multi_page(buffer_pool, header.catalog_range)?;
             if catalog_bytes.is_empty() {
                 Catalog::new()
             } else {
@@ -493,7 +493,7 @@ impl Database {
 
         // T021: Read node table data using multi-page support
         if header.metadata_range.num_pages > 0 {
-            let table_data_bytes = read_multi_page(buffer_pool, &header.metadata_range)?;
+            let table_data_bytes = read_multi_page(buffer_pool, header.metadata_range)?;
 
             if !table_data_bytes.is_empty() {
                 if let Ok(table_data_map) =
@@ -569,7 +569,7 @@ impl Database {
         }
 
         // T029: Read rel table data using multi-page support
-        let rel_data_bytes = read_multi_page(buffer_pool, &header.rel_metadata_range)
+        let rel_data_bytes = read_multi_page(buffer_pool, header.rel_metadata_range)
             .map_err(|e| RuzuError::RelTableLoadError(format!("Failed to read rel_table data: {e}")))?;
 
         if !rel_data_bytes.is_empty() {
@@ -631,7 +631,7 @@ impl Database {
             buffer_pool.allocate_page_range(catalog_pages_needed)?
         };
 
-        write_multi_page(buffer_pool, &catalog_data_range, &catalog_bytes)?;
+        write_multi_page(buffer_pool, catalog_data_range, &catalog_bytes)?;
 
         // T038: Update header catalog_range to reflect the (possibly new) range
         if let Some(ref mut header) = self.header {
@@ -665,7 +665,7 @@ impl Database {
             buffer_pool.allocate_page_range(pages_needed)?
         };
 
-        write_multi_page(buffer_pool, &node_data_range, &table_data_bytes)?;
+        write_multi_page(buffer_pool, node_data_range, &table_data_bytes)?;
 
         // T022: Update header metadata_range to reflect the (possibly new) range
         if let Some(ref mut header) = self.header {
@@ -699,7 +699,7 @@ impl Database {
             buffer_pool.allocate_page_range(rel_pages_needed)?
         };
 
-        write_multi_page(buffer_pool, &rel_data_range, &rel_data_bytes)?;
+        write_multi_page(buffer_pool, rel_data_range, &rel_data_bytes)?;
 
         // T030: Update header rel_metadata_range to reflect the (possibly new) range
         if let Some(ref mut header) = self.header {
@@ -890,6 +890,7 @@ impl Database {
         }
     }
 
+    #[allow(clippy::unused_self)]
     fn execute_explain(&mut self, inner: Statement) -> Result<QueryResult> {
         // For EXPLAIN, we parse and bind the inner query but don't execute it
         // Instead, we return the query plan as text
@@ -2178,7 +2179,7 @@ fn literal_into_value(literal: Literal) -> Value {
 #[doc(hidden)]
 pub fn write_multi_page_test(
     buffer_pool: &BufferPool,
-    range: &PageRange,
+    range: PageRange,
     data: &[u8],
 ) -> Result<()> {
     write_multi_page(buffer_pool, range, data)
@@ -2188,7 +2189,7 @@ pub fn write_multi_page_test(
 #[doc(hidden)]
 pub fn read_multi_page_test(
     buffer_pool: &BufferPool,
-    range: &PageRange,
+    range: PageRange,
 ) -> Result<Vec<u8>> {
     read_multi_page(buffer_pool, range)
 }

@@ -1499,8 +1499,8 @@ mod multi_page_foundation_tests {
         let range = pool.allocate_page_range(1).unwrap();
 
         let data = b"hello world";
-        ruzu::write_multi_page_test(&pool, &range, data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result, data);
     }
@@ -1517,8 +1517,8 @@ mod multi_page_foundation_tests {
         let num_pages = calculate_pages_needed(data.len());
         let range = pool.allocate_page_range(num_pages).unwrap();
 
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result, data);
     }
@@ -1530,8 +1530,8 @@ mod multi_page_foundation_tests {
         let range = pool.allocate_page_range(1).unwrap();
 
         let data: &[u8] = &[];
-        ruzu::write_multi_page_test(&pool, &range, data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result, data);
     }
@@ -1544,8 +1544,8 @@ mod multi_page_foundation_tests {
         let data: Vec<u8> = vec![0xAB; PAGE_SIZE - 4];
         let range = pool.allocate_page_range(1).unwrap();
 
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result, data);
     }
@@ -1559,8 +1559,8 @@ mod multi_page_foundation_tests {
         let data: Vec<u8> = (0..(2 * PAGE_SIZE - 4)).map(|i| (i % 251) as u8).collect();
         let range = pool.allocate_page_range(2).unwrap();
 
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result.len(), data.len());
         assert_eq!(result, data);
@@ -1575,8 +1575,8 @@ mod multi_page_foundation_tests {
         let data: Vec<u8> = vec![0xCD; PAGE_SIZE - 3];
         let range = pool.allocate_page_range(2).unwrap();
 
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
 
         assert_eq!(result, data);
     }
@@ -1585,7 +1585,7 @@ mod multi_page_foundation_tests {
     fn test_read_multi_page_empty_range_fails() {
         let (pool, _tmp) = create_test_buffer_pool();
         let empty_range = PageRange::new(0, 0);
-        let result = ruzu::read_multi_page_test(&pool, &empty_range);
+        let result = ruzu::read_multi_page_test(&pool, empty_range);
         assert!(result.is_err());
     }
 

@@ -2111,7 +2111,7 @@ mod multi_page_format_contracts {
         let data = vec![0xAA; 100];
         let range = pool.allocate_page_range(1).unwrap();
 
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
 
         // Read raw page and verify format
         use ruzu::storage::PageId;
@@ -2145,10 +2145,10 @@ mod multi_page_format_contracts {
         assert_eq!(num_pages, 2);
 
         let range = pool.allocate_page_range(num_pages).unwrap();
-        ruzu::write_multi_page_test(&pool, &range, &data).unwrap();
+        ruzu::write_multi_page_test(&pool, range, &data).unwrap();
 
         // Read back and verify
-        let result = ruzu::read_multi_page_test(&pool, &range).unwrap();
+        let result = ruzu::read_multi_page_test(&pool, range).unwrap();
         assert_eq!(result, data);
     }
 

@@ -144,7 +144,7 @@ impl RelLoader {
     fn parse_field(
         &self,
         field: &str,
-        data_type: &DataType,
+        data_type: DataType,
         row_num: u64,
         col_name: &str,
     ) -> std::result::Result<Value, ImportError> {
@@ -202,7 +202,7 @@ impl RelLoader {
         for (i, &csv_idx) in prop_indices.iter().enumerate() {
             let field = record.get(csv_idx).unwrap_or("");
             let (col_name, data_type) = &self.property_columns[i];
-            let value = self.parse_field(field, data_type, row_num, col_name)?;
+            let value = self.parse_field(field, *data_type, row_num, col_name)?;
             properties.push(value);
         }
 
@@ -344,7 +344,7 @@ impl RelLoader {
             100
         } else {
             let sample_size = 64 * 1024.min(data.len());
-            let newlines = data[..sample_size].iter().filter(|&&b| b == b'\n').count();
+            let newlines = data[..sample_size].iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
             if newlines > 0 {
                 sample_size / newlines
             } else {
@@ -417,7 +417,7 @@ impl RelLoader {
                 })?;
                 let value = parse_field_with_interner(
                     field,
-                    &prop_cols[i].1,
+                    prop_cols[i].1,
                     row_num,
                     &prop_cols[i].0,
                     interner.as_ref(),
@@ -636,7 +636,7 @@ impl RelLoader {
             let field = record.get(csv_idx).unwrap_or("");
             let value = parse_field_with_interner(
                 field,
-                &self.property_columns[i].1,
+                self.property_columns[i].1,
                 row_num,
                 &self.property_columns[i].0,
                 self.interner.as_ref(),
@@ -692,7 +692,7 @@ impl RelLoader {
 #[allow(dead_code)]
 fn parse_field_static(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
 ) -> std::result::Result<Value, ImportError> {
@@ -702,7 +702,7 @@ fn parse_field_static(
 /// Field parsing function with optional string interning.
 fn parse_field_with_interner(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
     interner: Option<&SharedInterner>,

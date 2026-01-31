@@ -87,7 +87,7 @@ impl NodeLoader {
     pub fn parse_field(
         &self,
         field: &str,
-        data_type: &DataType,
+        data_type: DataType,
         row_num: u64,
         col_name: &str,
     ) -> std::result::Result<Value, ImportError> {
@@ -150,7 +150,7 @@ impl NodeLoader {
             let field = record.get(csv_idx).unwrap_or("");
             let col_def = &self.schema.columns[col_idx];
 
-            let value = self.parse_field(field, &col_def.data_type, row_num, &col_def.name)?;
+            let value = self.parse_field(field, col_def.data_type, row_num, &col_def.name)?;
             values.push(value);
         }
 
@@ -291,7 +291,7 @@ impl NodeLoader {
             100
         } else {
             let sample_size = 64 * 1024.min(data.len());
-            let newlines = data[..sample_size].iter().filter(|&&b| b == b'\n').count();
+            let newlines = data[..sample_size].iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
             if newlines > 0 {
                 sample_size / newlines
             } else {
@@ -322,7 +322,7 @@ impl NodeLoader {
 
                 let value = parse_field_with_interner(
                     field,
-                    &col_def.data_type,
+                    col_def.data_type,
                     row_num,
                     &col_def.name,
                     interner.as_ref(),
@@ -480,7 +480,7 @@ impl NodeLoader {
 /// Field parsing function with optional string interning.
 fn parse_field_with_interner(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
     interner: Option<&SharedInterner>,
@@ -638,19 +638,19 @@ mod tests {
         let false_values = ["false", "False", "FALSE"];
 
         for val in true_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert_eq!(result.unwrap(), Value::Bool(true));
         }
 
         for val in false_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert_eq!(result.unwrap(), Value::Bool(false));
         }
 
         // Verify rejected values
         let rejected_values = ["1", "0", "yes", "no", "t", "f"];
         for val in rejected_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert!(result.is_err(), "Expected '{}' to be rejected", val);
         }
     }
