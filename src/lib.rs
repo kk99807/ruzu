@@ -1236,6 +1236,17 @@ impl Database {
             rows.push(row);
         }
 
+        Ok(Self::apply_modifiers_and_build_result(rows, output_columns, order_by, skip, limit))
+    }
+
+    /// Applies ORDER BY sorting, SKIP, LIMIT, and builds the final `QueryResult`.
+    fn apply_modifiers_and_build_result(
+        mut rows: Vec<Row>,
+        output_columns: Vec<String>,
+        order_by: Option<&Vec<parser::ast::OrderByItem>>,
+        skip: Option<i64>,
+        limit: Option<i64>,
+    ) -> QueryResult {
         // Apply ORDER BY if present
         if let Some(order_items) = order_by {
             rows.sort_by(|a, b| {
@@ -1280,7 +1291,7 @@ impl Database {
             result.add_row(row);
         }
 
-        Ok(result)
+        result
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1586,6 +1597,203 @@ impl Database {
         Ok(QueryResult::empty())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn collect_multi_hop_rows(
+        src_offsets: &[usize],
+        rel_table: &RelTable,
+        src_table: &Arc<NodeTable>,
+        dst_table: &Arc<NodeTable>,
+        dst_filter: Option<&(String, Value)>,
+        simple_projections: &[(String, String)],
+        src_node: &NodeFilter,
+        dst_node: &NodeFilter,
+        min_hops: u32,
+        max_hops: u32,
+    ) -> Vec<Row> {
+        use std::collections::VecDeque;
+        let mut rows = Vec::new();
+
+        for src_offset in src_offsets {
+            let mut queue: VecDeque<(u64, u32, Vec<u64>)> = VecDeque::new();
+            queue.push_back((*src_offset as u64, 0, vec![*src_offset as u64]));
+
+            while let Some((current_node, depth, path)) = queue.pop_front() {
+                if depth >= max_hops {
+                    continue;
+                }
+
+                let edges = rel_table.get_forward_edges(current_node);
+
+                for (next_node, _rel_id) in edges {
+                    if path.contains(&next_node) {
+                        continue;
+                    }
+
+                    let new_depth = depth + 1;
+
+                    if new_depth >= min_hops && new_depth <= max_hops {
+                        let passes_dst_filter = if let Some((key, expected_val)) = dst_filter {
+                            if let Some(actual_val) = dst_table.get(next_node as usize, key) {
+                                &actual_val == expected_val
+                            } else {
+                                false
+                            }
+                        } else {
+                            true
+                        };
+
+                        if passes_dst_filter {
+                            let mut row = Row::new();
+                            for (var, prop) in simple_projections {
+                                let col_name = format!("{var}.{prop}");
+                                if var == &src_node.var {
+                                    if let Some(val) = src_table.get(*src_offset, prop) {
+                                        row.set(col_name, val);
+                                    }
+                                } else if var == &dst_node.var {
+                                    if let Some(val) = dst_table.get(next_node as usize, prop) {
+                                        row.set(col_name, val);
+                                    }
+                                }
+                            }
+                            rows.push(row);
+                        }
+                    }
+
+                    if new_depth < max_hops {
+                        let mut new_path = path.clone();
+                        new_path.push(next_node);
+                        queue.push_back((next_node, new_depth, new_path));
+                    }
+                }
+            }
+        }
+
+        rows
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_single_hop_rows(
+        src_offsets: &[usize],
+        rel_table: &RelTable,
+        rel_schema: &RelTableSchema,
+        src_table: &Arc<NodeTable>,
+        dst_table: &Arc<NodeTable>,
+        dst_filter: Option<&(String, Value)>,
+        filter: Option<&parser::ast::Expression>,
+        simple_projections: &[(String, String)],
+        src_node: &NodeFilter,
+        dst_node: &NodeFilter,
+        rel_var: Option<&String>,
+    ) -> Vec<Row> {
+        let mut rows = Vec::new();
+
+        for src_offset in src_offsets {
+            let edges = rel_table.get_forward_edges(*src_offset as u64);
+
+            for (dst_offset, rel_id) in edges {
+                // Apply destination filter if present
+                if let Some((key, expected_val)) = dst_filter {
+                    if let Some(actual_val) = dst_table.get(dst_offset as usize, key) {
+                        if &actual_val != expected_val {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+
+                // Apply WHERE clause filter if present
+                if let Some(expr) = filter {
+                    let filter_val = if expr.var == src_node.var {
+                        src_table.get(*src_offset, &expr.property)
+                    } else if expr.var == dst_node.var {
+                        dst_table.get(dst_offset as usize, &expr.property)
+                    } else if rel_var == Some(&expr.var) {
+                        if let Some(props) = rel_table.get_properties(rel_id) {
+                            rel_schema
+                                .columns
+                                .iter()
+                                .position(|c| c.name == expr.property)
+                                .and_then(|idx| props.get(idx).cloned())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let matches = match filter_val {
+                        Some(val) => {
+                            let literal_val = literal_to_value(&expr.value);
+                            let (val, literal_val) = promote_for_comparison(val, literal_val);
+                            let cmp_result = val.compare(&literal_val);
+                            match cmp_result {
+                                None => false,
+                                Some(ordering) => match expr.op {
+                                    parser::ast::ComparisonOp::Gt => {
+                                        ordering == std::cmp::Ordering::Greater
+                                    }
+                                    parser::ast::ComparisonOp::Lt => {
+                                        ordering == std::cmp::Ordering::Less
+                                    }
+                                    parser::ast::ComparisonOp::Eq => {
+                                        ordering == std::cmp::Ordering::Equal
+                                    }
+                                    parser::ast::ComparisonOp::Gte => {
+                                        ordering != std::cmp::Ordering::Less
+                                    }
+                                    parser::ast::ComparisonOp::Lte => {
+                                        ordering != std::cmp::Ordering::Greater
+                                    }
+                                    parser::ast::ComparisonOp::Neq => {
+                                        ordering != std::cmp::Ordering::Equal
+                                    }
+                                },
+                            }
+                        }
+                        None => false,
+                    };
+
+                    if !matches {
+                        continue;
+                    }
+                }
+
+                // Build result row (only projected columns)
+                let mut row = Row::new();
+                for (var, prop) in simple_projections {
+                    let col_name = format!("{var}.{prop}");
+
+                    if var == &src_node.var {
+                        if let Some(val) = src_table.get(*src_offset, prop) {
+                            row.set(col_name, val);
+                        }
+                    } else if var == &dst_node.var {
+                        if let Some(val) = dst_table.get(dst_offset as usize, prop) {
+                            row.set(col_name, val);
+                        }
+                    } else if rel_var == Some(var) {
+                        if let Some(props) = rel_table.get_properties(rel_id) {
+                            for (idx, col) in rel_schema.columns.iter().enumerate() {
+                                if &col.name == prop {
+                                    if let Some(val) = props.get(idx) {
+                                        row.set(col_name.clone(), val.clone());
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                rows.push(row);
+            }
+        }
+
+        rows
+    }
+
     fn execute_match_rel(
         &self,
         rel: &RelPattern<'_>,
@@ -1654,237 +1862,22 @@ impl Database {
             (key.clone(), val)
         });
 
-        // Collect all rows
-        let mut rows: Vec<Row> = Vec::new();
-
-        // Multi-hop traversal using BFS when path_bounds is set
-        if let Some((min_hops, max_hops)) = path_bounds {
-            // BFS-based multi-hop traversal with cycle detection
-            use std::collections::VecDeque;
-
-            for src_offset in &src_offsets {
-                // Queue entries: (current_node, depth, path)
-                let mut queue: VecDeque<(u64, u32, Vec<u64>)> = VecDeque::new();
-                queue.push_back((*src_offset as u64, 0, vec![*src_offset as u64]));
-
-                while let Some((current_node, depth, path)) = queue.pop_front() {
-                    // If we've reached max depth, stop exploring
-                    if depth >= max_hops {
-                        continue;
-                    }
-
-                    // Get edges from current node
-                    let edges = rel_table.get_forward_edges(current_node);
-
-                    for (next_node, _rel_id) in edges {
-                        // Cycle detection - skip if we've already visited this node
-                        if path.contains(&next_node) {
-                            continue;
-                        }
-
-                        let new_depth = depth + 1;
-
-                        // If within valid hop range, emit this result
-                        if new_depth >= min_hops && new_depth <= max_hops {
-                            // Apply destination filter if present
-                            let passes_dst_filter = if let Some((ref key, ref expected_val)) = dst_filter {
-                                if let Some(actual_val) = dst_table.get(next_node as usize, key) {
-                                    &actual_val == expected_val
-                                } else {
-                                    false
-                                }
-                            } else {
-                                true
-                            };
-
-                            if passes_dst_filter {
-                                // Build result row
-                                let mut row = Row::new();
-                                for (var, prop) in &simple_projections {
-                                    let col_name = format!("{var}.{prop}");
-
-                                    if var == &src_node.var {
-                                        if let Some(val) = src_table.get(*src_offset, prop) {
-                                            row.set(col_name, val);
-                                        }
-                                    } else if var == &dst_node.var {
-                                        if let Some(val) = dst_table.get(next_node as usize, prop) {
-                                            row.set(col_name, val);
-                                        }
-                                    }
-                                }
-                                rows.push(row);
-                            }
-                        }
-
-                        // Add to queue for further exploration if not at max depth
-                        if new_depth < max_hops {
-                            let mut new_path = path.clone();
-                            new_path.push(next_node);
-                            queue.push_back((next_node, new_depth, new_path));
-                        }
-                    }
-                }
-            }
+        // Collect all rows via multi-hop or single-hop traversal
+        let rows = if let Some((min_hops, max_hops)) = path_bounds {
+            Self::collect_multi_hop_rows(
+                &src_offsets, rel_table, src_table, dst_table,
+                dst_filter.as_ref(), &simple_projections, src_node, dst_node,
+                min_hops, max_hops,
+            )
         } else {
-            // Single-hop traversal (original behavior)
-            for src_offset in src_offsets {
-                let edges = rel_table.get_forward_edges(src_offset as u64);
-
-                for (dst_offset, rel_id) in edges {
-                // Apply destination filter if present
-                if let Some((ref key, ref expected_val)) = dst_filter {
-                    if let Some(actual_val) = dst_table.get(dst_offset as usize, key) {
-                        if &actual_val != expected_val {
-                            continue; // Filter out
-                        }
-                    } else {
-                        continue; // Key not found
-                    }
-                }
-
-                // Apply WHERE clause filter if present
-                // We need to evaluate the filter before building the output row
-                if let Some(expr) = filter {
-                    // Get the filter value directly from the table
-                    let filter_val = if expr.var == src_node.var {
-                        src_table.get(src_offset, &expr.property)
-                    } else if expr.var == dst_node.var {
-                        dst_table.get(dst_offset as usize, &expr.property)
-                    } else if rel_var == Some(&expr.var) {
-                        // Relationship property
-                        if let Some(props) = rel_table.get_properties(rel_id) {
-                            rel_schema
-                                .columns
-                                .iter()
-                                .position(|c| c.name == expr.property)
-                                .and_then(|idx| props.get(idx).cloned())
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    let matches = match filter_val {
-                        Some(val) => {
-                            let literal_val = literal_to_value(&expr.value);
-                            // Promote for cross-type comparison (Int64 vs Float64)
-                            let (val, literal_val) = promote_for_comparison(val, literal_val);
-                            let cmp_result = val.compare(&literal_val);
-                            match cmp_result {
-                                None => false,
-                                Some(ordering) => match expr.op {
-                                    parser::ast::ComparisonOp::Gt => {
-                                        ordering == std::cmp::Ordering::Greater
-                                    }
-                                    parser::ast::ComparisonOp::Lt => {
-                                        ordering == std::cmp::Ordering::Less
-                                    }
-                                    parser::ast::ComparisonOp::Eq => {
-                                        ordering == std::cmp::Ordering::Equal
-                                    }
-                                    parser::ast::ComparisonOp::Gte => {
-                                        ordering != std::cmp::Ordering::Less
-                                    }
-                                    parser::ast::ComparisonOp::Lte => {
-                                        ordering != std::cmp::Ordering::Greater
-                                    }
-                                    parser::ast::ComparisonOp::Neq => {
-                                        ordering != std::cmp::Ordering::Equal
-                                    }
-                                },
-                            }
-                        }
-                        None => false,
-                    };
-
-                    if !matches {
-                        continue;
-                    }
-                }
-
-                // Build result row (only projected columns)
-                let mut row = Row::new();
-                for (var, prop) in &simple_projections {
-                    let col_name = format!("{var}.{prop}");
-
-                    if var == &src_node.var {
-                        // Source node property
-                        if let Some(val) = src_table.get(src_offset, prop) {
-                            row.set(col_name, val);
-                        }
-                    } else if var == &dst_node.var {
-                        // Destination node property
-                        if let Some(val) = dst_table.get(dst_offset as usize, prop) {
-                            row.set(col_name, val);
-                        }
-                    } else if rel_var == Some(var) {
-                        // Relationship property
-                        if let Some(props) = rel_table.get_properties(rel_id) {
-                            // Find property by name from schema
-                            for (idx, col) in rel_schema.columns.iter().enumerate() {
-                                if &col.name == prop {
-                                    if let Some(val) = props.get(idx) {
-                                        row.set(col_name.clone(), val.clone());
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                rows.push(row);
-            }
-            } // end single-hop for dst_offset in edges
-        } // end else (single-hop traversal)
-
-        // Apply ORDER BY if present
-        if let Some(order_items) = order_by {
-            rows.sort_by(|a, b| {
-                for order_item in order_items {
-                    let col_name = format!("{}.{}", order_item.var, order_item.property);
-                    let val_a = a.get(&col_name);
-                    let val_b = b.get(&col_name);
-
-                    let ordering = match (val_a, val_b) {
-                        (Some(va), Some(vb)) => va.compare(vb).unwrap_or(std::cmp::Ordering::Equal),
-                        (None, Some(_)) => std::cmp::Ordering::Greater, // NULLs last
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    };
-
-                    if ordering != std::cmp::Ordering::Equal {
-                        return if order_item.ascending {
-                            ordering
-                        } else {
-                            ordering.reverse()
-                        };
-                    }
-                }
-                std::cmp::Ordering::Equal
-            });
-        }
-
-        // Apply SKIP
-        let skip_count = usize::try_from(skip.unwrap_or(0).max(0)).unwrap_or(0);
-        let rows = rows.into_iter().skip(skip_count);
-
-        // Apply LIMIT
-        let rows: Vec<Row> = if let Some(limit_count) = limit {
-            rows.take(usize::try_from(limit_count.max(0)).unwrap_or(0))
-                .collect()
-        } else {
-            rows.collect()
+            Self::collect_single_hop_rows(
+                &src_offsets, rel_table, &rel_schema, src_table, dst_table,
+                dst_filter.as_ref(), filter, &simple_projections,
+                src_node, dst_node, rel_var,
+            )
         };
 
-        let mut result = QueryResult::new(output_columns);
-        for row in rows {
-            result.add_row(row);
-        }
-
-        Ok(result)
+        Ok(Self::apply_modifiers_and_build_result(rows, output_columns, order_by, skip, limit))
     }
 
     /// Executes a COPY command to import data from a CSV file.
