@@ -1863,16 +1863,16 @@ impl Database {
         }
 
         // Determine if this is a node table or relationship table
-        if self.catalog.table_exists(&table_name) {
+        if self.catalog.table_exists(table_name) {
             // Node table import
-            let result = self.import_nodes(&table_name, path, config, None)?;
+            let result = self.import_nodes(table_name, path, config, None)?;
             Ok(QueryResult::import_result(
                 result.rows_imported,
                 result.rows_failed,
             ))
-        } else if self.catalog.rel_table_exists(&table_name) {
+        } else if self.catalog.rel_table_exists(table_name) {
             // Relationship table import
-            let result = self.import_relationships(&table_name, path, config, None)?;
+            let result = self.import_relationships(table_name, path, config, None)?;
             Ok(QueryResult::import_result(
                 result.rows_imported,
                 result.rows_failed,

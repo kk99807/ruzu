@@ -134,7 +134,7 @@ impl CypherToDf {
         let mut result = Self::to_physical_expr(&operands[0], schema)?;
         for operand in &operands[1..] {
             let right = Self::to_physical_expr(operand, schema)?;
-            result = Arc::new(BinaryExpr::new(result, op.clone(), right));
+            result = Arc::new(BinaryExpr::new(result, op, right));
         }
         Ok(result)
     }

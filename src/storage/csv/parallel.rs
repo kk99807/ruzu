@@ -142,7 +142,7 @@ impl ThreadLocalErrors {
             return;
         }
         let mut map = self.errors_by_block.lock();
-        map.entry(block_idx).or_insert_with(Vec::new).extend(errors);
+        map.entry(block_idx).or_default().extend(errors);
     }
 
     /// Collect all errors in block order.
@@ -150,7 +150,7 @@ impl ThreadLocalErrors {
     pub fn collect_ordered(&self) -> Vec<ImportError> {
         let map = self.errors_by_block.lock();
         let mut block_indices: Vec<_> = map.keys().copied().collect();
-        block_indices.sort();
+        block_indices.sort_unstable();
 
         let mut all_errors = Vec::new();
         for idx in block_indices {
@@ -205,12 +205,12 @@ impl ParallelCsvReader {
         let num_blocks = if file_size == 0 {
             1
         } else {
-            ((file_size as usize + block_size - 1) / block_size).max(1)
+            (file_size as usize).div_ceil(block_size).max(1)
         };
 
         // Determine thread count
         let available_threads = std::thread::available_parallelism()
-            .map(|p| p.get())
+            .map(std::num::NonZero::get)
             .unwrap_or(1);
         let num_threads = num_threads
             .unwrap_or(available_threads)
@@ -449,7 +449,7 @@ where
         current_row += 1;
 
         // Check if we've crossed into the next block using the record's position
-        let position = byte_record.position().map_or(0, |p| p.byte());
+        let position = byte_record.position().map_or(0, csv::Position::byte);
         if actual_start as u64 + position > next_block_start as u64 {
             // We've processed all rows that belong to this block
             break;
@@ -514,11 +514,7 @@ pub fn estimate_row_offsets(
         .iter()
         .map(|block| {
             if block.is_first_block {
-                if config.has_header {
-                    1
-                } else {
-                    0
-                } // Start after header
+                u64::from(config.has_header) // Start after header
             } else {
                 #[allow(clippy::cast_precision_loss)]
                 let estimate = (block.start_offset as f64 / avg_bytes_per_row) as u64;
@@ -561,7 +557,7 @@ where
 
     // Create block assignments
     let file_size = data.len() as u64;
-    let num_blocks = ((file_size as usize + config.block_size - 1) / config.block_size).max(1);
+    let num_blocks = (file_size as usize).div_ceil(config.block_size).max(1);
 
     let blocks: Vec<BlockAssignment> = (0..num_blocks)
         .map(|idx| BlockAssignment::new(idx, config.block_size, file_size, idx == 0))
@@ -585,7 +581,7 @@ where
     }
 
     // Aggregate results in block order
-    let mut block_results: Vec<BlockResult> = results.into_iter().filter_map(|r| r.ok()).collect();
+    let mut block_results: Vec<BlockResult> = results.into_iter().filter_map(std::result::Result::ok).collect();
     block_results.sort_by_key(|r| r.block_idx);
 
     let mut all_rows = Vec::new();

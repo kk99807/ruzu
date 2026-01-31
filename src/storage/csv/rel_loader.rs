@@ -440,7 +440,7 @@ impl RelLoader {
         let relationships: Vec<ParsedRelationship> = raw_rows
             .into_iter()
             .map(|values| {
-                let from_key = values.get(0).cloned().unwrap_or(Value::Null);
+                let from_key = values.first().cloned().unwrap_or(Value::Null);
                 let to_key = values.get(1).cloned().unwrap_or(Value::Null);
                 let properties: Vec<Value> = values.into_iter().skip(2).collect();
                 ParsedRelationship {

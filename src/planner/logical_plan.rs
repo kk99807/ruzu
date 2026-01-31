@@ -227,7 +227,7 @@ impl LogicalPlan {
             LogicalPlan::Sort { input, .. } => input.output_schema(),
             LogicalPlan::Limit { input, .. } => input.output_schema(),
             LogicalPlan::Union { inputs, .. } => {
-                inputs.first().map_or_else(Vec::new, |p| p.output_schema())
+                inputs.first().map_or_else(Vec::new, LogicalPlan::output_schema)
             }
             LogicalPlan::Empty { schema } => schema.clone(),
         }
@@ -372,8 +372,8 @@ impl LogicalPlan {
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Limit { skip, limit, input } => {
-                let skip_str = skip.map_or("".to_string(), |s| format!("SKIP {s}"));
-                let limit_str = limit.map_or("".to_string(), |l| format!("LIMIT {l}"));
+                let skip_str = skip.map_or(String::new(), |s| format!("SKIP {s}"));
+                let limit_str = limit.map_or(String::new(), |l| format!("LIMIT {l}"));
                 writeln!(f, "{prefix}Limit: {skip_str} {limit_str}")?;
                 input.format_plan(f, indent + 1)?;
             }

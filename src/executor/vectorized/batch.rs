@@ -58,7 +58,7 @@ impl VectorizedBatch {
     pub fn num_rows(&self) -> usize {
         self.selection
             .as_ref()
-            .map_or_else(|| self.batch.num_rows(), |s| s.len())
+            .map_or_else(|| self.batch.num_rows(), SelectionVector::len)
     }
 
     /// Returns the number of columns in this batch.
