@@ -42,9 +42,13 @@ impl<T> Transformed<T> {
 /// Optimizer rule trait.
 pub trait OptimizerRule: Send + Sync {
     /// Returns the name of this rule.
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Rewrites the logical plan if applicable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rewrite encounters an invalid plan structure.
     fn rewrite(&self, plan: LogicalPlan) -> Result<Transformed<LogicalPlan>>;
 }
 
@@ -63,19 +67,16 @@ pub enum ConstantValue {
     Unknown,
 }
 
-/// Tries to evaluate a BoundExpression to a constant boolean value.
+/// Tries to evaluate a `BoundExpression` to a constant boolean value.
 fn try_evaluate_constant(expr: &BoundExpression) -> ConstantValue {
     match expr {
-        BoundExpression::Literal { value, .. } => match value {
-            Value::Bool(b) => {
-                if *b {
-                    ConstantValue::True
-                } else {
-                    ConstantValue::False
-                }
+        BoundExpression::Literal { value: Value::Bool(b), .. } => {
+            if *b {
+                ConstantValue::True
+            } else {
+                ConstantValue::False
             }
-            _ => ConstantValue::Unknown,
-        },
+        }
         BoundExpression::Comparison { left, op, right, .. } => {
             if let (
                 BoundExpression::Literal { value: left_val, .. },
@@ -239,11 +240,11 @@ fn simplify_predicate(expr: &BoundExpression) -> BoundExpression {
 
 /// Predicate simplification rule.
 ///
-/// Simplifies constant expressions like WHERE 1=0 → EmptyResult.
+/// Simplifies constant expressions like WHERE 1=0 → `EmptyResult`.
 pub struct PredicateSimplificationRule;
 
 impl OptimizerRule for PredicateSimplificationRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "PredicateSimplification"
     }
 
@@ -264,13 +265,13 @@ impl OptimizerRule for PredicateSimplificationRule {
                     }
                     ConstantValue::Unknown => {
                         // Check if predicate changed
-                        if format!("{:?}", predicate) != format!("{:?}", simplified) {
+                        if format!("{predicate:?}") == format!("{simplified:?}") {
+                            Ok(Transformed::No(LogicalPlan::Filter { input, predicate }))
+                        } else {
                             Ok(Transformed::Yes(LogicalPlan::Filter {
                                 input,
                                 predicate: simplified,
                             }))
-                        } else {
-                            Ok(Transformed::No(LogicalPlan::Filter { input, predicate }))
                         }
                     }
                 }
@@ -286,7 +287,7 @@ impl OptimizerRule for PredicateSimplificationRule {
 pub struct ConstantFoldingRule;
 
 impl OptimizerRule for ConstantFoldingRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ConstantFolding"
     }
 

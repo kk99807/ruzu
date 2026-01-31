@@ -32,7 +32,7 @@ pub struct ExtendOperator {
     current_input_row: Option<Row>,
     /// Current edges for the current input row.
     current_edges: Vec<(u64, u64)>,
-    /// Index into current_edges.
+    /// Index into `current_edges`.
     edge_index: usize,
 }
 
@@ -65,18 +65,25 @@ impl ExtendOperator {
     fn get_src_node_id(&self, row: &Row) -> Result<u64> {
         let id_col = format!("{}._id", self.src_variable);
         if let Some(Value::Int64(id)) = row.get(&id_col) {
-            return Ok(*id as u64);
+            return u64::try_from(*id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Negative node ID {id} for {id_col}"))
+            });
         }
 
         let id_col = format!("{}.id", self.src_variable);
         if let Some(Value::Int64(id)) = row.get(&id_col) {
-            return Ok(*id as u64);
+            return u64::try_from(*id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Negative node ID {id} for {id_col}"))
+            });
         }
 
         for (key, value) in row.iter() {
+            #[allow(clippy::case_sensitive_file_extension_comparisons)]
             if key.starts_with(&self.src_variable) && key.ends_with(".id") {
                 if let Value::Int64(id) = value {
-                    return Ok(*id as u64);
+                    return u64::try_from(*id).map_err(|_| {
+                        RuzuError::ExecutionError(format!("Negative node ID {id} for {key}"))
+                    });
                 }
             }
         }
@@ -99,14 +106,20 @@ impl ExtendOperator {
         }
     }
 
-    fn create_output_row(&self, input_row: &Row, dst_node_id: u64, rel_id: u64) -> Row {
+    fn create_output_row(&self, input_row: &Row, dst_node_id: u64, rel_id: u64) -> Result<Row> {
         let mut output = input_row.clone();
         let dst_id_col = format!("{}._id", self.dst_variable);
-        output.insert(dst_id_col, Value::Int64(dst_node_id as i64));
+        let dst_id_i64 = i64::try_from(dst_node_id).map_err(|_| {
+            RuzuError::ExecutionError(format!("Node ID {dst_node_id} exceeds i64 range"))
+        })?;
+        output.insert(dst_id_col, Value::Int64(dst_id_i64));
 
         if let Some(ref rel_var) = self.rel_variable {
-            let rel_id_col = format!("{}._id", rel_var);
-            output.insert(rel_id_col, Value::Int64(rel_id as i64));
+            let rel_id_col = format!("{rel_var}._id");
+            let rel_id_i64 = i64::try_from(rel_id).map_err(|_| {
+                RuzuError::ExecutionError(format!("Rel ID {rel_id} exceeds i64 range"))
+            })?;
+            output.insert(rel_id_col, Value::Int64(rel_id_i64));
 
             if let Some(props) = self.rel_table.get_properties(rel_id) {
                 for (idx, col) in self.rel_schema.columns.iter().enumerate() {
@@ -117,7 +130,7 @@ impl ExtendOperator {
                 }
             }
         }
-        output
+        Ok(output)
     }
 }
 
@@ -129,7 +142,7 @@ impl PhysicalOperator for ExtendOperator {
                 self.edge_index += 1;
 
                 if let Some(ref input_row) = self.current_input_row {
-                    return Ok(Some(self.create_output_row(input_row, dst_node_id, rel_id)));
+                    return Ok(Some(self.create_output_row(input_row, dst_node_id, rel_id)?));
                 }
             }
 

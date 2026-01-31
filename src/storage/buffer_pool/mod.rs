@@ -205,6 +205,24 @@ impl BufferPool {
         })
     }
 
+    /// Allocates a contiguous range of pages on disk without pinning them.
+    ///
+    /// Returns the `PageRange` for the newly allocated pages.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if disk allocation fails.
+    pub fn allocate_page_range(&self, num_pages: u32) -> Result<crate::storage::PageRange> {
+        let mut dm = self.disk_manager.write();
+        dm.allocate_page_range(num_pages)
+    }
+
+    /// Returns the total number of pages allocated in the database file.
+    #[must_use]
+    pub fn file_page_count(&self) -> u32 {
+        self.disk_manager.read().num_pages()
+    }
+
     /// Flushes a specific page to disk if it's dirty.
     ///
     /// # Errors
@@ -439,6 +457,7 @@ impl BufferPoolStats {
     ///
     /// Returns `None` if there have been no cache accesses.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn hit_rate(&self) -> Option<f64> {
         let total = self.cache_hits + self.cache_misses;
         if total == 0 {

@@ -15,7 +15,7 @@ use crate::planner::logical_plan::LogicalPlan;
 pub struct ProjectionPushdownRule;
 
 impl OptimizerRule for ProjectionPushdownRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "ProjectionPushdown"
     }
 
@@ -34,7 +34,7 @@ impl OptimizerRule for ProjectionPushdownRule {
                         projection: _,
                     } => {
                         // Extract column names (without variable prefix) that belong to this variable
-                        let prefix = format!("{}.", variable);
+                        let prefix = format!("{variable}.");
                         let projection: Vec<String> = required_columns
                             .iter()
                             .filter(|col| col.starts_with(&prefix))
@@ -94,12 +94,13 @@ fn collect_required_columns(expressions: &[(String, BoundExpression)]) -> HashSe
 fn collect_columns_from_expr(expr: &BoundExpression, columns: &mut HashSet<String>) {
     match expr {
         BoundExpression::PropertyAccess { variable, property, .. } => {
-            columns.insert(format!("{}.{}", variable, property));
+            columns.insert(format!("{variable}.{property}"));
         }
         BoundExpression::VariableRef { variable, .. } => {
             columns.insert(variable.clone());
         }
-        BoundExpression::Comparison { left, right, .. } => {
+        BoundExpression::Comparison { left, right, .. }
+        | BoundExpression::Arithmetic { left, right, .. } => {
             collect_columns_from_expr(left, columns);
             collect_columns_from_expr(right, columns);
         }
@@ -107,10 +108,6 @@ fn collect_columns_from_expr(expr: &BoundExpression, columns: &mut HashSet<Strin
             for operand in operands {
                 collect_columns_from_expr(operand, columns);
             }
-        }
-        BoundExpression::Arithmetic { left, right, .. } => {
-            collect_columns_from_expr(left, columns);
-            collect_columns_from_expr(right, columns);
         }
         BoundExpression::Aggregate { input, .. } => {
             if let Some(inner) = input {

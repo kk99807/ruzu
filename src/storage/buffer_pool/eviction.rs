@@ -75,7 +75,6 @@ impl LruEvictionQueue {
     }
 
     /// Returns the frame indices in eviction order (oldest first).
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = &usize> {
         self.queue.iter()
     }

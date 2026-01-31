@@ -92,6 +92,7 @@ Sync Impact Report:
 **Code MUST follow Rust community standards and leverage the ecosystem.**
 
 - MUST pass `cargo clippy` with zero warnings
+- Preferably, make the fixes in code. Clippy fixes MUST be as narrow as possible: use targeted `#[allow(...)]` on the specific item (function, block, or statement) rather than module-wide or crate-wide suppression. Blanket `#[allow(...)]` at module or crate level requires explicit approval from the developer/maintainer before applying.
 - MUST format with `rustfmt` (standard configuration)
 - MUST use `cargo-deny` to check dependencies for security/licensing issues
 - MUST prefer safe Rust; justify any `unsafe` blocks with SAFETY comments

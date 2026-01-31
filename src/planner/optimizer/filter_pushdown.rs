@@ -12,7 +12,7 @@ use crate::planner::logical_plan::LogicalPlan;
 pub struct FilterPushdownRule;
 
 impl OptimizerRule for FilterPushdownRule {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "FilterPushdown"
     }
 

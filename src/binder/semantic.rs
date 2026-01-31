@@ -232,6 +232,11 @@ impl<'a> Binder<'a> {
     }
 
     /// Binds a node pattern, returning a bound node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the variable is already defined in scope or the
+    /// table label does not exist in the catalog.
     pub fn bind_node(&mut self, variable: &str, label: &str) -> Result<BoundNode> {
         // Check for duplicate variable
         if self.scope.contains(variable) {
@@ -251,6 +256,12 @@ impl<'a> Binder<'a> {
     }
 
     /// Binds a relationship pattern, returning a bound relationship.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the variable is already defined, the source or
+    /// destination variable is undefined, or the relationship type does not
+    /// exist in the catalog.
     pub fn bind_relationship(
         &mut self,
         variable: Option<&str>,
@@ -295,6 +306,10 @@ impl<'a> Binder<'a> {
     }
 
     /// Validates that a variable exists in scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the variable is not defined in the current scope.
     pub fn validate_variable(&self, name: &str) -> Result<&BoundVariable> {
         self.scope
             .lookup(name)
@@ -302,6 +317,11 @@ impl<'a> Binder<'a> {
     }
 
     /// Validates that a property exists on a variable's table schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the variable is undefined or the property does not
+    /// exist on the variable's table schema.
     pub fn validate_property(&self, variable: &str, property: &str) -> Result<DataType> {
         let var = self.validate_variable(variable)?;
 

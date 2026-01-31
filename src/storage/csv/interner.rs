@@ -70,6 +70,7 @@ impl StringInterner {
     ///
     /// A higher hit rate indicates more string reuse and better memory savings.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total > 0 {

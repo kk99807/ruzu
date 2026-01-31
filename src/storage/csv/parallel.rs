@@ -39,6 +39,9 @@ use crate::error::RuzuError;
 use crate::storage::csv::{CsvImportConfig, ImportError, ImportProgress};
 use crate::types::Value;
 
+/// Result of a parallel CSV read: (parsed rows, non-fatal errors, bytes processed).
+type ParallelReadResult = Result<(Vec<Vec<Value>>, Vec<ImportError>, u64), RuzuError>;
+
 /// Work assignment for a single block of the CSV file.
 #[derive(Debug, Clone)]
 pub struct BlockAssignment {
@@ -123,7 +126,7 @@ impl ParsedBatch {
 /// Collects errors from multiple threads.
 #[derive(Debug, Default)]
 pub struct ThreadLocalErrors {
-    /// Errors indexed by block_idx.
+    /// Errors indexed by `block_idx`.
     errors_by_block: Arc<Mutex<HashMap<usize, Vec<ImportError>>>>,
 }
 
@@ -142,7 +145,7 @@ impl ThreadLocalErrors {
             return;
         }
         let mut map = self.errors_by_block.lock();
-        map.entry(block_idx).or_insert_with(Vec::new).extend(errors);
+        map.entry(block_idx).or_default().extend(errors);
     }
 
     /// Collect all errors in block order.
@@ -150,7 +153,7 @@ impl ThreadLocalErrors {
     pub fn collect_ordered(&self) -> Vec<ImportError> {
         let map = self.errors_by_block.lock();
         let mut block_indices: Vec<_> = map.keys().copied().collect();
-        block_indices.sort();
+        block_indices.sort_unstable();
 
         let mut all_errors = Vec::new();
         for idx in block_indices {
@@ -198,19 +201,19 @@ impl ParallelCsvReader {
         num_threads: Option<usize>,
     ) -> Result<Self, RuzuError> {
         let metadata = std::fs::metadata(path)
-            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {}", e)))?;
+            .map_err(|e| RuzuError::StorageError(format!("Failed to get file metadata: {e}")))?;
         let file_size = metadata.len();
 
         // Calculate number of blocks
         let num_blocks = if file_size == 0 {
             1
         } else {
-            ((file_size as usize + block_size - 1) / block_size).max(1)
+            (file_size as usize).div_ceil(block_size).max(1)
         };
 
         // Determine thread count
         let available_threads = std::thread::available_parallelism()
-            .map(|p| p.get())
+            .map(std::num::NonZeroUsize::get)
             .unwrap_or(1);
         let num_threads = num_threads
             .unwrap_or(available_threads)
@@ -378,6 +381,11 @@ pub struct BlockResult {
 /// # Returns
 ///
 /// A `BlockResult` containing parsed rows and any errors encountered.
+///
+/// # Errors
+///
+/// Returns an error if the CSV reader cannot be constructed or a non-ignorable
+/// parse error occurs.
 pub fn process_block<F>(
     data: &[u8],
     block: &BlockAssignment,
@@ -444,7 +452,7 @@ where
         current_row += 1;
 
         // Check if we've crossed into the next block using the record's position
-        let position = byte_record.position().map_or(0, |p| p.byte());
+        let position = byte_record.position().map_or(0, csv::Position::byte);
         if actual_start as u64 + position > next_block_start as u64 {
             // We've processed all rows that belong to this block
             break;
@@ -478,6 +486,7 @@ where
 ///
 /// This is an approximation since we don't know exact row boundaries without
 /// scanning the file. We estimate based on average bytes per row from block 0.
+#[must_use]
 pub fn estimate_row_offsets(
     data: &[u8],
     blocks: &[BlockAssignment],
@@ -498,6 +507,7 @@ pub fn estimate_row_offsets(
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
     let avg_bytes_per_row = if line_count > 0 {
         sample.len() as f64 / line_count as f64
     } else {
@@ -508,13 +518,13 @@ pub fn estimate_row_offsets(
         .iter()
         .map(|block| {
             if block.is_first_block {
-                if config.has_header {
-                    1
-                } else {
-                    0
-                } // Start after header
+                u64::from(config.has_header) // Start after header
             } else {
-                (block.start_offset as f64 / avg_bytes_per_row) as u64
+                #[allow(clippy::cast_precision_loss)]
+                let estimate_f64 = (block.start_offset as f64 / avg_bytes_per_row).max(0.0);
+                #[allow(clippy::cast_sign_loss)] // Clamped to non-negative above
+                let estimate = estimate_f64 as u64;
+                estimate
             }
         })
         .collect()
@@ -534,11 +544,16 @@ pub fn estimate_row_offsets(
 /// # Returns
 ///
 /// A vector of all parsed rows in file order, plus aggregated errors and statistics.
+///
+/// # Errors
+///
+/// Returns an error if block assignment fails or any block encounters a
+/// non-ignorable parse error.
 pub fn parallel_read_all<F>(
     data: &[u8],
     config: &CsvImportConfig,
     parse_row: F,
-) -> Result<(Vec<Vec<Value>>, Vec<ImportError>, u64), RuzuError>
+) -> ParallelReadResult
 where
     F: Fn(&csv::ByteRecord, u64) -> Result<Vec<Value>, ImportError> + Sync + Send,
 {
@@ -548,7 +563,7 @@ where
 
     // Create block assignments
     let file_size = data.len() as u64;
-    let num_blocks = ((file_size as usize + config.block_size - 1) / config.block_size).max(1);
+    let num_blocks = (file_size as usize).div_ceil(config.block_size).max(1);
 
     let blocks: Vec<BlockAssignment> = (0..num_blocks)
         .map(|idx| BlockAssignment::new(idx, config.block_size, file_size, idx == 0))
@@ -572,7 +587,7 @@ where
     }
 
     // Aggregate results in block order
-    let mut block_results: Vec<BlockResult> = results.into_iter().filter_map(|r| r.ok()).collect();
+    let mut block_results: Vec<BlockResult> = results.into_iter().filter_map(std::result::Result::ok).collect();
     block_results.sort_by_key(|r| r.block_idx);
 
     let mut all_rows = Vec::new();

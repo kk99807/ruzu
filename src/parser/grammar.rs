@@ -52,9 +52,9 @@ fn build_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::explain_query => return build_explain_query(inner),
-            Rule::copy_from => return build_copy_from(inner),
+            Rule::copy_from => return Ok(build_copy_from(inner)),
             Rule::create_node_table => return Ok(build_create_node_table(inner)),
-            Rule::create_rel_table => return build_create_rel_table(inner),
+            Rule::create_rel_table => return Ok(build_create_rel_table(inner)),
             Rule::create_node => return build_create_node(inner),
             Rule::match_create => return build_match_create(inner),
             Rule::match_query => return build_match_query(inner),
@@ -84,7 +84,7 @@ fn build_explain_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     })
 }
 
-fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
+fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Statement {
     let mut table_name = String::new();
     let mut file_path = String::new();
     let mut options = CopyOptions::default();
@@ -150,11 +150,11 @@ fn build_copy_from(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
         }
     }
 
-    Ok(Statement::Copy {
+    Statement::Copy {
         table_name,
         file_path,
         options,
-    })
+    }
 }
 
 fn parse_bool_literal(s: &str) -> bool {
@@ -205,7 +205,7 @@ fn build_create_node_table(pair: pest::iterators::Pair<Rule>) -> Statement {
     }
 }
 
-fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
+fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Statement {
     let mut table_name = String::new();
     let mut src_table = String::new();
     let mut dst_table = String::new();
@@ -237,12 +237,12 @@ fn build_create_rel_table(pair: pest::iterators::Pair<Rule>) -> Result<Statement
         }
     }
 
-    Ok(Statement::CreateRelTable {
+    Statement::CreateRelTable {
         table_name,
         src_table,
         dst_table,
         columns,
-    })
+    }
 }
 
 fn build_create_node(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -402,6 +402,78 @@ fn build_node_filter(pair: pest::iterators::Pair<Rule>) -> Result<NodeFilter> {
     })
 }
 
+/// Extracts an integer literal from a clause pair (used for SKIP and LIMIT).
+fn parse_integer_clause(pair: pest::iterators::Pair<Rule>, name: &str) -> Result<i64> {
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::integer_literal {
+            return inner.as_str().parse().map_err(|_| RuzuError::ParseError {
+                line: 0,
+                col: 0,
+                message: format!("Invalid {name} value"),
+            });
+        }
+    }
+    Err(RuzuError::ParseError {
+        line: 0,
+        col: 0,
+        message: format!("Missing integer in {name} clause"),
+    })
+}
+
+/// Parsed components of a relationship match pattern.
+struct RelPattern {
+    src_node: Option<NodeFilter>,
+    dst_node: Option<NodeFilter>,
+    rel_var: Option<String>,
+    rel_type: String,
+    path_bounds: Option<(u32, u32)>,
+}
+
+/// Parses a `match_rel_pattern` pair into its component parts.
+fn build_rel_pattern(pair: pest::iterators::Pair<Rule>) -> Result<RelPattern> {
+    let mut result = RelPattern {
+        src_node: None,
+        dst_node: None,
+        rel_var: None,
+        rel_type: String::new(),
+        path_bounds: None,
+    };
+
+    for rel_inner in pair.into_inner() {
+        match rel_inner.as_rule() {
+            Rule::match_node_with_filter => {
+                let node_filter = build_node_filter_with_optional_props(rel_inner)?;
+                if result.src_node.is_none() {
+                    result.src_node = Some(node_filter);
+                } else {
+                    result.dst_node = Some(node_filter);
+                }
+            }
+            Rule::match_rel_type => {
+                for type_inner in rel_inner.into_inner() {
+                    match type_inner.as_rule() {
+                        Rule::identifier => {
+                            if result.rel_type.is_empty() {
+                                result.rel_type = type_inner.as_str().to_string();
+                            } else {
+                                result.rel_var = Some(std::mem::take(&mut result.rel_type));
+                                result.rel_type = type_inner.as_str().to_string();
+                            }
+                        }
+                        Rule::path_length => {
+                            result.path_bounds = Some(build_path_length(type_inner)?);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(result)
+}
+
 fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut var = String::new();
     let mut label = String::new();
@@ -410,7 +482,6 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut order_by = None;
     let mut skip = None;
     let mut limit = None;
-    let mut path_bounds = None;
 
     // Check if this is a relationship match or a simple node match
     let mut is_rel_match = false;
@@ -418,6 +489,7 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let mut dst_node = None;
     let mut rel_var = None;
     let mut rel_type = String::new();
+    let mut path_bounds = None;
 
     for inner in pair.clone().into_inner() {
         if inner.as_rule() == Rule::match_rel_pattern {
@@ -434,42 +506,12 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 label = idents.next().unwrap().as_str().to_string();
             }
             Rule::match_rel_pattern => {
-                for rel_inner in inner.into_inner() {
-                    match rel_inner.as_rule() {
-                        Rule::match_node_with_filter => {
-                            let node_filter = build_node_filter_with_optional_props(rel_inner)?;
-                            if src_node.is_none() {
-                                src_node = Some(node_filter);
-                            } else {
-                                dst_node = Some(node_filter);
-                            }
-                        }
-                        Rule::match_rel_type => {
-                            for type_inner in rel_inner.into_inner() {
-                                match type_inner.as_rule() {
-                                    Rule::identifier => {
-                                        if rel_type.is_empty() {
-                                            // Could be variable or type
-                                            let s = type_inner.as_str().to_string();
-                                            // If there's another identifier, this was the variable
-                                            // Otherwise it's the type
-                                            rel_type = s;
-                                        } else {
-                                            // Previous was variable, this is type
-                                            rel_var = Some(std::mem::take(&mut rel_type));
-                                            rel_type = type_inner.as_str().to_string();
-                                        }
-                                    }
-                                    Rule::path_length => {
-                                        path_bounds = Some(build_path_length(type_inner)?);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                let rp = build_rel_pattern(inner)?;
+                src_node = rp.src_node;
+                dst_node = rp.dst_node;
+                rel_var = rp.rel_var;
+                rel_type = rp.rel_type;
+                path_bounds = rp.path_bounds;
             }
             Rule::where_clause => {
                 for where_inner in inner.into_inner() {
@@ -486,29 +528,13 @@ fn build_match_query(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 }
             }
             Rule::order_by_clause => {
-                order_by = Some(build_order_by_clause(inner)?);
+                order_by = Some(build_order_by_clause(inner));
             }
             Rule::skip_clause => {
-                for skip_inner in inner.into_inner() {
-                    if skip_inner.as_rule() == Rule::integer_literal {
-                        skip = Some(skip_inner.as_str().parse().map_err(|_| RuzuError::ParseError {
-                            line: 0,
-                            col: 0,
-                            message: "Invalid SKIP value".into(),
-                        })?);
-                    }
-                }
+                skip = Some(parse_integer_clause(inner, "SKIP")?);
             }
             Rule::limit_clause => {
-                for limit_inner in inner.into_inner() {
-                    if limit_inner.as_rule() == Rule::integer_literal {
-                        limit = Some(limit_inner.as_str().parse().map_err(|_| RuzuError::ParseError {
-                            line: 0,
-                            col: 0,
-                            message: "Invalid LIMIT value".into(),
-                        })?);
-                    }
-                }
+                limit = Some(parse_integer_clause(inner, "LIMIT")?);
             }
             _ => {}
         }
@@ -588,7 +614,7 @@ fn build_aggregate_expr(pair: pest::iterators::Pair<Rule>) -> Result<ReturnItem>
                 func = Some(AstAggregateFunction::parse(func_name).ok_or_else(|| RuzuError::ParseError {
                     line: 0,
                     col: 0,
-                    message: format!("Unknown aggregate function: {}", func_name),
+                    message: format!("Unknown aggregate function: {func_name}"),
                 })?);
             }
             Rule::projection => {
@@ -611,7 +637,7 @@ fn build_aggregate_expr(pair: pest::iterators::Pair<Rule>) -> Result<ReturnItem>
     }
 }
 
-fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<OrderByItem>> {
+fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Vec<OrderByItem> {
     let mut items = Vec::new();
 
     for inner in pair.into_inner() {
@@ -642,7 +668,7 @@ fn build_order_by_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<OrderB
         }
     }
 
-    Ok(items)
+    items
 }
 
 fn build_path_length(pair: pest::iterators::Pair<Rule>) -> Result<(u32, u32)> {
@@ -670,7 +696,7 @@ fn build_path_length(pair: pest::iterators::Pair<Rule>) -> Result<(u32, u32)> {
         return Err(RuzuError::ParseError {
             line: 0,
             col: 0,
-            message: format!("Invalid path length: min {} > max {}", min_hops, max_hops),
+            message: format!("Invalid path length: min {min_hops} > max {max_hops}"),
         });
     }
 

@@ -87,7 +87,7 @@ impl NodeLoader {
     pub fn parse_field(
         &self,
         field: &str,
-        data_type: &DataType,
+        data_type: DataType,
         row_num: u64,
         col_name: &str,
     ) -> std::result::Result<Value, ImportError> {
@@ -150,7 +150,7 @@ impl NodeLoader {
             let field = record.get(csv_idx).unwrap_or("");
             let col_def = &self.schema.columns[col_idx];
 
-            let value = self.parse_field(field, &col_def.data_type, row_num, &col_def.name)?;
+            let value = self.parse_field(field, col_def.data_type, row_num, &col_def.name)?;
             values.push(value);
         }
 
@@ -287,17 +287,7 @@ impl NodeLoader {
         let column_indices = self.validate_headers(&headers)?;
 
         // Estimate total rows for progress
-        let avg_row_size = if !data.is_empty() {
-            let sample_size = 64 * 1024.min(data.len());
-            let newlines = data[..sample_size].iter().filter(|&&b| b == b'\n').count();
-            if newlines > 0 {
-                sample_size / newlines
-            } else {
-                100
-            }
-        } else {
-            100
-        };
+        let avg_row_size = super::estimate_avg_row_size(data);
         progress.rows_total = Some((file_size as usize / avg_row_size) as u64);
 
         // Create parsing closure that captures schema info
@@ -322,7 +312,7 @@ impl NodeLoader {
 
                 let value = parse_field_with_interner(
                     field,
-                    &col_def.data_type,
+                    col_def.data_type,
                     row_num,
                     &col_def.name,
                     interner.as_ref(),
@@ -480,7 +470,7 @@ impl NodeLoader {
 /// Field parsing function with optional string interning.
 fn parse_field_with_interner(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
     interner: Option<&SharedInterner>,
@@ -510,8 +500,8 @@ fn parse_field_with_interner(
         },
         DataType::String => {
             if let Some(interner) = interner {
-                let interned = interner.write().intern(field);
-                Ok(Value::String(interned.to_string()))
+                let interned_val = interner.write().intern(field);
+                Ok(Value::String(interned_val.to_string()))
             } else {
                 Ok(Value::String(field.to_string()))
             }
@@ -638,19 +628,19 @@ mod tests {
         let false_values = ["false", "False", "FALSE"];
 
         for val in true_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert_eq!(result.unwrap(), Value::Bool(true));
         }
 
         for val in false_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert_eq!(result.unwrap(), Value::Bool(false));
         }
 
         // Verify rejected values
         let rejected_values = ["1", "0", "yes", "no", "t", "f"];
         for val in rejected_values {
-            let result = loader.parse_field(val, &DataType::Bool, 1, "test");
+            let result = loader.parse_field(val, DataType::Bool, 1, "test");
             assert!(result.is_err(), "Expected '{}' to be rejected", val);
         }
     }

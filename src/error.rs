@@ -89,6 +89,19 @@ pub enum RuzuError {
     #[error("Relationship table corrupted: {0}")]
     RelTableCorrupted(String),
 
+    // ==================== Multi-Page Storage Errors ====================
+    /// Page range overlap detected.
+    #[error("Page range overlap: {0}")]
+    PageRangeOverlap(String),
+
+    /// Page range out of bounds.
+    #[error("Page range out of bounds: {0}")]
+    PageRangeOutOfBounds(String),
+
+    /// Multi-page data corrupted.
+    #[error("Multi-page data corrupted: {0}")]
+    MultiPageDataCorrupted(String),
+
     // ==================== Query Engine Errors (Phase 2) ====================
     /// Binding error (semantic analysis).
     #[error("Bind error: {0}")]

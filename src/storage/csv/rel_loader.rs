@@ -144,7 +144,7 @@ impl RelLoader {
     fn parse_field(
         &self,
         field: &str,
-        data_type: &DataType,
+        data_type: DataType,
         row_num: u64,
         col_name: &str,
     ) -> std::result::Result<Value, ImportError> {
@@ -202,7 +202,7 @@ impl RelLoader {
         for (i, &csv_idx) in prop_indices.iter().enumerate() {
             let field = record.get(csv_idx).unwrap_or("");
             let (col_name, data_type) = &self.property_columns[i];
-            let value = self.parse_field(field, data_type, row_num, col_name)?;
+            let value = self.parse_field(field, *data_type, row_num, col_name)?;
             properties.push(value);
         }
 
@@ -340,17 +340,7 @@ impl RelLoader {
         let (from_idx, to_idx, prop_indices) = self.validate_headers(&headers)?;
 
         // Estimate total rows for progress
-        let avg_row_size = if !data.is_empty() {
-            let sample_size = 64 * 1024.min(data.len());
-            let newlines = data[..sample_size].iter().filter(|&&b| b == b'\n').count();
-            if newlines > 0 {
-                sample_size / newlines
-            } else {
-                100
-            }
-        } else {
-            100
-        };
+        let avg_row_size = super::estimate_avg_row_size(data);
         progress.rows_total = Some((file_size as usize / avg_row_size) as u64);
 
         // Create parsing closure that captures loader info
@@ -417,7 +407,7 @@ impl RelLoader {
                 })?;
                 let value = parse_field_with_interner(
                     field,
-                    &prop_cols[i].1,
+                    prop_cols[i].1,
                     row_num,
                     &prop_cols[i].0,
                     interner.as_ref(),
@@ -440,7 +430,7 @@ impl RelLoader {
         let relationships: Vec<ParsedRelationship> = raw_rows
             .into_iter()
             .map(|values| {
-                let from_key = values.get(0).cloned().unwrap_or(Value::Null);
+                let from_key = values.first().cloned().unwrap_or(Value::Null);
                 let to_key = values.get(1).cloned().unwrap_or(Value::Null);
                 let properties: Vec<Value> = values.into_iter().skip(2).collect();
                 ParsedRelationship {
@@ -636,7 +626,7 @@ impl RelLoader {
             let field = record.get(csv_idx).unwrap_or("");
             let value = parse_field_with_interner(
                 field,
-                &self.property_columns[i].1,
+                self.property_columns[i].1,
                 row_num,
                 &self.property_columns[i].0,
                 self.interner.as_ref(),
@@ -692,7 +682,7 @@ impl RelLoader {
 #[allow(dead_code)]
 fn parse_field_static(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
 ) -> std::result::Result<Value, ImportError> {
@@ -702,7 +692,7 @@ fn parse_field_static(
 /// Field parsing function with optional string interning.
 fn parse_field_with_interner(
     field: &str,
-    data_type: &DataType,
+    data_type: DataType,
     row_num: u64,
     col_name: &str,
     interner: Option<&SharedInterner>,
@@ -732,8 +722,8 @@ fn parse_field_with_interner(
         },
         DataType::String => {
             if let Some(interner) = interner {
-                let interned = interner.write().intern(field);
-                Ok(Value::String(interned.to_string()))
+                let interned_val = interner.write().intern(field);
+                Ok(Value::String(interned_val.to_string()))
             } else {
                 Ok(Value::String(field.to_string()))
             }

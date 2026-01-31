@@ -233,13 +233,10 @@ impl WalReplayer {
                 WalRecordType::Abort => {
                     self.active_txs.remove(&record.transaction_id);
                 }
-                WalRecordType::Checkpoint => {
-                    // Checkpoint - all active transactions are implicitly committed
-                    // (simplified model)
-                }
                 _ => {
-                    // Data modification record - keep if from committed transaction
-                    // We'll filter during apply phase
+                    // Checkpoint or data modification record
+                    // Data records kept for potential replay; checkpoints implicitly
+                    // commit active transactions (simplified model)
                 }
             }
 

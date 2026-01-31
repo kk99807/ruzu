@@ -2,7 +2,7 @@
 
 **ruzu** is an embeddable graph database written in pure Rust, inspired by [KuzuDB](https://github.com/kuzudb/kuzu). It uses a subset of the Cypher query language and targets use cases where you want a lightweight, embedded graph database with no separate server process.
 
-> **v0.0.1 — Early Development.** This is a working database with persistence, crash recovery, and a real query engine, but it is not yet production-ready. See [Current Limitations](#current-limitations) below.
+> **v0.0.2 — Early Development.** This is a working database with persistence, crash recovery, multi-page storage, and a real query engine, but it is not yet production-ready. See [Current Limitations](#current-limitations) below.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-ruzu = "0.0.1"
+ruzu = "0.0.2"
 ```
 
 ```rust
@@ -28,7 +28,7 @@ let results = db.execute("MATCH (p:Person) WHERE p.age > 20 RETURN p.name, p.age
 ## Features
 
 - **Embedded** — No server, no network. Open a file and query it.
-- **Persistent** — 4KB page-based storage with write-ahead logging and crash recovery.
+- **Persistent** — Multi-page storage with write-ahead logging and crash recovery.
 - **Cypher queries** — Supports a subset of Cypher (see [Supported Cypher](#supported-cypher) below).
 - **Relationships** — CSR (Compressed Sparse Row) edge storage with bidirectional traversal.
 - **Bulk import** — `COPY FROM` CSV with parallel parsing via rayon.
@@ -70,7 +70,7 @@ let results = db.execute("MATCH (p:Person) WHERE p.age > 20 RETURN p.name, p.age
 
 ## Current Limitations
 
-1. **Single-page storage.** All data for a table currently lives in a single page rather than the file-per-column layout that KuzuDB uses for performant multi-hop traversals. Near-term plan is multi-page storage, followed by refactoring toward a columnar-file architecture.
+1. **No columnar-file storage.** Data is stored across multiple 4KB pages (no single-page limit), but not yet in the file-per-column layout that KuzuDB uses for performant multi-hop traversals. Near-term plan is refactoring toward a columnar-file architecture.
 
 2. **Limited data types.** Only 4 types (`INT64`, `FLOAT64`, `BOOL`, `STRING`) are usable end-to-end in DDL. `Date`, `Timestamp`, and `Float32` exist in the type system but are not yet wired into the parser.
 
@@ -107,7 +107,7 @@ Inspired by [KuzuDB](https://github.com/kuzudb/kuzu) ([docs](https://docs.kuzudb
 
 Benchmarks run on Windows x86_64, Rust 1.75+ (release mode).
 
-### CSV Bulk Import Performance (Optimized - v0.0.1)
+### CSV Bulk Import Performance (Optimized)
 
 With parallel parsing and memory-mapped I/O enabled:
 
@@ -151,6 +151,14 @@ cargo bench --bench e2e_benchmark      # End-to-end queries
 ```
 
 ## Development
+
+### Setup
+
+After cloning, enable the pre-commit hook that blocks commits with clippy warnings:
+
+```bash
+git config core.hooksPath .githooks
+```
 
 This project uses [SpecKit](https://github.com/cased/speckit) for structured development workflow:
 

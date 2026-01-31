@@ -65,7 +65,7 @@ pub enum LogicalPlan {
     /// Project columns/expressions.
     Project {
         input: Box<LogicalPlan>,
-        /// (output_name, expression).
+        /// (`output_name`, expression).
         expressions: Vec<(String, BoundExpression)>,
     },
 
@@ -195,17 +195,19 @@ impl LogicalPlan {
             LogicalPlan::Extend { input, dst_variable, .. } => {
                 let mut schema = input.output_schema();
                 // Add destination node columns
-                schema.push((format!("{}.id", dst_variable), DataType::Int64));
+                schema.push((format!("{dst_variable}.id"), DataType::Int64));
                 schema
             }
             LogicalPlan::PathExpand { input, path_variable, .. } => {
                 let mut schema = input.output_schema();
                 if let Some(path_var) = path_variable {
-                    schema.push((format!("{}.path", path_var), DataType::String));
+                    schema.push((format!("{path_var}.path"), DataType::String));
                 }
                 schema
             }
-            LogicalPlan::Filter { input, .. } => input.output_schema(),
+            LogicalPlan::Filter { input, .. }
+            | LogicalPlan::Sort { input, .. }
+            | LogicalPlan::Limit { input, .. } => input.output_schema(),
             LogicalPlan::Project { expressions, .. } => {
                 expressions.iter()
                     .map(|(name, expr)| (name.clone(), expr.data_type()))
@@ -219,15 +221,13 @@ impl LogicalPlan {
             LogicalPlan::Aggregate { aggregates, group_by, .. } => {
                 let mut schema: Vec<_> = group_by.iter()
                     .enumerate()
-                    .map(|(i, expr)| (format!("group_{}", i), expr.data_type()))
+                    .map(|(i, expr)| (format!("group_{i}"), expr.data_type()))
                     .collect();
                 schema.extend(aggregates.iter().map(|(name, expr)| (name.clone(), expr.data_type())));
                 schema
             }
-            LogicalPlan::Sort { input, .. } => input.output_schema(),
-            LogicalPlan::Limit { input, .. } => input.output_schema(),
             LogicalPlan::Union { inputs, .. } => {
-                inputs.first().map_or_else(Vec::new, |p| p.output_schema())
+                inputs.first().map_or_else(Vec::new, LogicalPlan::output_schema)
             }
             LogicalPlan::Empty { schema } => schema.clone(),
         }
@@ -316,51 +316,51 @@ impl LogicalPlan {
 
         match self {
             LogicalPlan::NodeScan { table_name, variable, pushed_filters, projection, .. } => {
-                writeln!(f, "{}NodeScan: {} as {}", prefix, table_name, variable)?;
+                writeln!(f, "{prefix}NodeScan: {table_name} as {variable}")?;
                 if !pushed_filters.is_empty() {
-                    writeln!(f, "{}  filters: {} predicates pushed", child_prefix, pushed_filters.len())?;
+                    writeln!(f, "{child_prefix}  filters: {} predicates pushed", pushed_filters.len())?;
                 }
                 if let Some(proj) = projection {
-                    writeln!(f, "{}  projection: [{}]", child_prefix, proj.join(", "))?;
+                    writeln!(f, "{child_prefix}  projection: [{}]", proj.join(", "))?;
                 }
             }
             LogicalPlan::RelScan { table_name, variable, pushed_filters, projection, .. } => {
                 let var = variable.as_deref().unwrap_or("_");
-                writeln!(f, "{}RelScan: {} as {}", prefix, table_name, var)?;
+                writeln!(f, "{prefix}RelScan: {table_name} as {var}")?;
                 if !pushed_filters.is_empty() {
-                    writeln!(f, "{}  filters: {} predicates pushed", child_prefix, pushed_filters.len())?;
+                    writeln!(f, "{child_prefix}  filters: {} predicates pushed", pushed_filters.len())?;
                 }
                 if let Some(proj) = projection {
-                    writeln!(f, "{}  projection: [{}]", child_prefix, proj.join(", "))?;
+                    writeln!(f, "{child_prefix}  projection: [{}]", proj.join(", "))?;
                 }
             }
             LogicalPlan::Extend { rel_type, src_variable, dst_variable, direction, input, .. } => {
-                writeln!(f, "{}Extend: {} ({} -> {}) {:?}", prefix, rel_type, src_variable, dst_variable, direction)?;
+                writeln!(f, "{prefix}Extend: {rel_type} ({src_variable} -> {dst_variable}) {direction:?}")?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::PathExpand { rel_type, src_variable, dst_variable, min_hops, max_hops, direction, input, .. } => {
-                writeln!(f, "{}PathExpand: {} ({} -> {}) *{}..{} {:?}", prefix, rel_type, src_variable, dst_variable, min_hops, max_hops, direction)?;
+                writeln!(f, "{prefix}PathExpand: {rel_type} ({src_variable} -> {dst_variable}) *{min_hops}..{max_hops} {direction:?}")?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Filter { predicate, input } => {
-                writeln!(f, "{}Filter: {:?}", prefix, predicate)?;
+                writeln!(f, "{prefix}Filter: {predicate:?}")?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Project { expressions, input } => {
                 let expr_names: Vec<_> = expressions.iter().map(|(name, _)| name.as_str()).collect();
-                writeln!(f, "{}Project: [{}]", prefix, expr_names.join(", "))?;
+                writeln!(f, "{prefix}Project: [{}]", expr_names.join(", "))?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::HashJoin { left_keys, right_keys, join_type, left, right, .. } => {
-                writeln!(f, "{}HashJoin: {:?} ON {} = {}", prefix, join_type, left_keys.join(", "), right_keys.join(", "))?;
-                writeln!(f, "{}Build Side:", child_prefix)?;
+                writeln!(f, "{prefix}HashJoin: {join_type:?} ON {} = {}", left_keys.join(", "), right_keys.join(", "))?;
+                writeln!(f, "{child_prefix}Build Side:")?;
                 left.format_plan(f, indent + 2)?;
-                writeln!(f, "{}Probe Side:", child_prefix)?;
+                writeln!(f, "{child_prefix}Probe Side:")?;
                 right.format_plan(f, indent + 2)?;
             }
             LogicalPlan::Aggregate { group_by, aggregates, input } => {
                 let agg_names: Vec<_> = aggregates.iter().map(|(name, _)| name.as_str()).collect();
-                writeln!(f, "{}Aggregate: [{}] GROUP BY {} columns", prefix, agg_names.join(", "), group_by.len())?;
+                writeln!(f, "{prefix}Aggregate: [{}] GROUP BY {} columns", agg_names.join(", "), group_by.len())?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Sort { order_by, input } => {
@@ -368,25 +368,25 @@ impl LogicalPlan {
                     let dir = if s.ascending { "ASC" } else { "DESC" };
                     format!("{:?} {}", s.expr, dir)
                 }).collect();
-                writeln!(f, "{}Sort: [{}]", prefix, orders.join(", "))?;
+                writeln!(f, "{prefix}Sort: [{}]", orders.join(", "))?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Limit { skip, limit, input } => {
-                let skip_str = skip.map_or("".to_string(), |s| format!("SKIP {}", s));
-                let limit_str = limit.map_or("".to_string(), |l| format!("LIMIT {}", l));
-                writeln!(f, "{}Limit: {} {}", prefix, skip_str, limit_str)?;
+                let skip_str = skip.map_or(String::new(), |s| format!("SKIP {s}"));
+                let limit_str = limit.map_or(String::new(), |l| format!("LIMIT {l}"));
+                writeln!(f, "{prefix}Limit: {skip_str} {limit_str}")?;
                 input.format_plan(f, indent + 1)?;
             }
             LogicalPlan::Union { inputs, all } => {
                 let union_type = if *all { "UNION ALL" } else { "UNION" };
-                writeln!(f, "{}{}: {} inputs", prefix, union_type, inputs.len())?;
+                writeln!(f, "{prefix}{union_type}: {} inputs", inputs.len())?;
                 for (i, input) in inputs.iter().enumerate() {
-                    writeln!(f, "{}Input {}:", child_prefix, i)?;
+                    writeln!(f, "{child_prefix}Input {i}:")?;
                     input.format_plan(f, indent + 2)?;
                 }
             }
             LogicalPlan::Empty { schema } => {
-                writeln!(f, "{}Empty: {} columns", prefix, schema.len())?;
+                writeln!(f, "{prefix}Empty: {} columns", schema.len())?;
             }
         }
         Ok(())

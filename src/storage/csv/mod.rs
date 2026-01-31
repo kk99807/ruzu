@@ -42,6 +42,7 @@ use crate::error::RuzuError;
 
 /// Configuration for CSV import operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct CsvImportConfig {
     // CSV parsing options
     /// Field separator (default: ',').
@@ -226,6 +227,12 @@ impl CsvImportConfig {
     /// - `batch_size` is 0 or greater than 1,000,000
     /// - `mmap_threshold` is less than 1MB
     pub fn validate(&self) -> Result<(), RuzuError> {
+        const MIN_BLOCK_SIZE: usize = 64 * 1024; // 64KB
+        const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024; // 16MB
+        // Allow larger batch sizes for streaming imports (up to 10M)
+        const MAX_BATCH_SIZE: usize = 10_000_000;
+        const MIN_MMAP_THRESHOLD: u64 = 1024 * 1024; // 1MB
+
         if let Some(threads) = self.num_threads {
             if threads == 0 {
                 return Err(RuzuError::ValidationError(
@@ -234,20 +241,15 @@ impl CsvImportConfig {
             }
         }
 
-        const MIN_BLOCK_SIZE: usize = 64 * 1024; // 64KB
-        const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024; // 16MB
-
         if self.block_size < MIN_BLOCK_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "block_size must be at least {} bytes",
-                MIN_BLOCK_SIZE
+                "block_size must be at least {MIN_BLOCK_SIZE} bytes"
             )));
         }
 
         if self.block_size > MAX_BLOCK_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "block_size must be at most {} bytes",
-                MAX_BLOCK_SIZE
+                "block_size must be at most {MAX_BLOCK_SIZE} bytes"
             )));
         }
 
@@ -257,20 +259,15 @@ impl CsvImportConfig {
             ));
         }
 
-        // Allow larger batch sizes for streaming imports (up to 10M)
-        const MAX_BATCH_SIZE: usize = 10_000_000;
         if self.batch_size > MAX_BATCH_SIZE {
             return Err(RuzuError::ValidationError(format!(
-                "batch_size must be at most {}",
-                MAX_BATCH_SIZE
+                "batch_size must be at most {MAX_BATCH_SIZE}"
             )));
         }
 
-        const MIN_MMAP_THRESHOLD: u64 = 1024 * 1024; // 1MB
         if self.mmap_threshold < MIN_MMAP_THRESHOLD {
             return Err(RuzuError::ValidationError(format!(
-                "mmap_threshold must be at least {} bytes",
-                MIN_MMAP_THRESHOLD
+                "mmap_threshold must be at least {MIN_MMAP_THRESHOLD} bytes"
             )));
         }
 
@@ -332,6 +329,7 @@ impl ImportProgress {
 
     /// Returns the completion percentage (0.0 to 1.0).
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn percent_complete(&self) -> Option<f64> {
         self.rows_total.map(|total| {
             if total == 0 {
@@ -391,6 +389,7 @@ impl ImportProgress {
             if elapsed > 0.001 {
                 // Only sample if at least 1ms has passed
                 let rows_delta = self.rows_processed - self.last_row_count;
+                #[allow(clippy::cast_precision_loss)]
                 let sample = rows_delta as f64 / elapsed;
                 self.throughput_samples.push(sample);
                 // Keep only last 10 samples
@@ -406,6 +405,7 @@ impl ImportProgress {
 
     /// Returns the overall throughput in rows/second.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn throughput(&self) -> Option<f64> {
         let elapsed = self.start_time?.elapsed().as_secs_f64();
         if elapsed > 0.0 {
@@ -436,6 +436,7 @@ impl ImportProgress {
 
     /// Returns the estimated time remaining in seconds.
     #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn eta_seconds(&self) -> Option<f64> {
         let remaining = self.rows_total?.saturating_sub(self.rows_processed);
         let throughput = self.smoothed_throughput()?;
@@ -543,6 +544,25 @@ impl ImportResult {
 
 /// Callback type for progress reporting.
 pub type ProgressCallback = Box<dyn Fn(ImportProgress) + Send>;
+
+/// Estimates the average row size in bytes by sampling newlines near the start of the data.
+///
+/// Returns a default of 100 if the data is empty or contains no newlines in the sample.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn estimate_avg_row_size(data: &[u8]) -> usize {
+    if data.is_empty() {
+        return 100;
+    }
+    let sample_size = (64 * 1024).min(data.len());
+    let newlines = data[..sample_size]
+        .iter()
+        .fold(0usize, |n, &b| n + usize::from(b == b'\n'));
+    if newlines > 0 {
+        sample_size / newlines
+    } else {
+        100
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,4 +1,4 @@
-//! Vectorized batch wrapper around Arrow RecordBatch.
+//! Vectorized batch wrapper around Arrow `RecordBatch`.
 
 use arrow::array::{Array, ArrayRef, UInt32Array};
 use arrow::datatypes::SchemaRef;
@@ -7,17 +7,18 @@ use arrow::record_batch::RecordBatch;
 /// Default batch size for vectorized execution (rows per batch).
 pub const DEFAULT_BATCH_SIZE: usize = 2048;
 
-/// Wrapper around Arrow RecordBatch with optional selection vector.
+/// Wrapper around Arrow `RecordBatch` with optional selection vector.
 #[derive(Debug, Clone)]
 pub struct VectorizedBatch {
-    /// The underlying Arrow RecordBatch.
+    /// The underlying Arrow `RecordBatch`.
     batch: RecordBatch,
     /// Optional selection vector for filtered rows.
     selection: Option<SelectionVector>,
 }
 
 impl VectorizedBatch {
-    /// Creates a new vectorized batch from a RecordBatch.
+    /// Creates a new vectorized batch from a `RecordBatch`.
+    #[must_use]
     pub fn new(batch: RecordBatch) -> Self {
         VectorizedBatch {
             batch,
@@ -26,6 +27,7 @@ impl VectorizedBatch {
     }
 
     /// Creates a new vectorized batch with a selection vector.
+    #[must_use]
     pub fn with_selection(batch: RecordBatch, selection: SelectionVector) -> Self {
         VectorizedBatch {
             batch,
@@ -33,7 +35,7 @@ impl VectorizedBatch {
         }
     }
 
-    /// Returns the underlying RecordBatch.
+    /// Returns the underlying `RecordBatch`.
     #[must_use]
     pub fn batch(&self) -> &RecordBatch {
         &self.batch
@@ -58,7 +60,7 @@ impl VectorizedBatch {
     pub fn num_rows(&self) -> usize {
         self.selection
             .as_ref()
-            .map_or_else(|| self.batch.num_rows(), |s| s.len())
+            .map_or_else(|| self.batch.num_rows(), SelectionVector::len)
     }
 
     /// Returns the number of columns in this batch.
@@ -74,6 +76,7 @@ impl VectorizedBatch {
     }
 
     /// Returns a column by name.
+    #[must_use]
     pub fn column_by_name(&self, name: &str) -> Option<&ArrayRef> {
         let schema = self.batch.schema();
         schema.index_of(name).ok().map(|i| self.batch.column(i))
@@ -82,6 +85,10 @@ impl VectorizedBatch {
     /// Applies the selection vector to produce a new batch with only selected rows.
     ///
     /// If there's no selection vector, returns the batch unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Arrow error if the take or record batch construction fails.
     pub fn materialize(&self) -> arrow::error::Result<RecordBatch> {
         if let Some(ref selection) = self.selection {
             let indices = UInt32Array::from(selection.indices.clone());
@@ -98,6 +105,10 @@ impl VectorizedBatch {
     }
 
     /// Applies a filter predicate to this batch, returning a new batch with selection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an Arrow error if the predicate is not a boolean array.
     pub fn filter(&self, predicate: &dyn Array) -> arrow::error::Result<Self> {
         let bool_array = predicate
             .as_any()
@@ -130,11 +141,13 @@ pub struct SelectionVector {
 
 impl SelectionVector {
     /// Creates a new selection vector with the given indices.
+    #[must_use]
     pub fn new(indices: Vec<u32>) -> Self {
         SelectionVector { indices }
     }
 
     /// Creates a selection vector selecting all rows up to count.
+    #[must_use]
     pub fn all(count: usize) -> Self {
         SelectionVector {
             indices: (0..count as u32).collect(),

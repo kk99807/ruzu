@@ -86,15 +86,19 @@ impl ExecutorConfig {
 pub struct QueryExecutor {
     /// Executor configuration.
     config: ExecutorConfig,
-    /// DataFusion session context.
+    /// `DataFusion` session context.
     session_ctx: SessionContext,
 }
 
 impl QueryExecutor {
     /// Creates a new query executor with the given configuration.
     ///
-    /// Configures the DataFusion session context with the specified batch size
+    /// Configures the `DataFusion` session context with the specified batch size
     /// and memory limits.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `DataFusion` runtime environment fails to build.
     #[must_use]
     pub fn new(config: ExecutorConfig) -> Self {
         // Configure DataFusion session with batch size
@@ -207,7 +211,8 @@ impl QueryExecutor {
             .map_err(|e| RuzuError::ExecutionError(e.to_string()))
     }
 
-    /// Converts a logical plan to a DataFusion physical plan.
+    /// Converts a logical plan to a `DataFusion` physical plan.
+    #[allow(clippy::unused_self)]
     fn to_physical_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
         // For now, create a simple placeholder physical plan
         // This will be expanded in the User Story phases
@@ -254,6 +259,7 @@ pub trait PhysicalOperator {
 }
 
 /// Promotes values for cross-type comparison (Int64 vs Float64).
+#[allow(clippy::cast_precision_loss)]
 fn promote_for_comparison(a: Value, b: Value) -> (Value, Value) {
     match (&a, &b) {
         (Value::Int64(n), Value::Float64(_)) => (Value::Float64(*n as f64), b),

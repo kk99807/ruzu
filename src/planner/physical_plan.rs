@@ -1,5 +1,7 @@
 //! Physical plan mapping from logical to physical operators.
 
+use std::fmt::Write;
+
 use crate::binder::Direction;
 use crate::catalog::Catalog;
 
@@ -20,20 +22,21 @@ impl<'a> PlanMapper<'a> {
     /// Converts a logical plan to a description string for debugging.
     ///
     /// In the full implementation, this would return Arc<dyn ExecutionPlan>.
+    #[must_use]
     pub fn describe(&self, plan: &LogicalPlan) -> String {
-        self.describe_plan(plan, 0)
+        Self::describe_plan(plan, 0)
     }
 
-    fn describe_plan(&self, plan: &LogicalPlan, indent: usize) -> String {
+    fn describe_plan(plan: &LogicalPlan, indent: usize) -> String {
         let prefix = "  ".repeat(indent);
         match plan {
             LogicalPlan::NodeScan { table_name, variable, pushed_filters, projection, .. } => {
                 let mut desc = format!("{prefix}NodeScan [{table_name} as {variable}]");
                 if !pushed_filters.is_empty() {
-                    desc.push_str(&format!(" filters={}", pushed_filters.len()));
+                    let _ = write!(desc, " filters={}", pushed_filters.len());
                 }
                 if let Some(proj) = projection {
-                    desc.push_str(&format!(" projection={:?}", proj));
+                    let _ = write!(desc, " projection={proj:?}");
                 }
                 desc
             }
@@ -47,49 +50,48 @@ impl<'a> PlanMapper<'a> {
                     Direction::Backward => "BACKWARD",
                     Direction::Both => "BOTH",
                 };
-                let child = self.describe_plan(input, indent + 1);
+                let child = Self::describe_plan(input, indent + 1);
                 format!("{prefix}Extend [{rel_type}, {dir}] -> {dst_variable}\n{child}")
             }
             LogicalPlan::PathExpand { input, rel_type, min_hops, max_hops, .. } => {
-                let child = self.describe_plan(input, indent + 1);
+                let child = Self::describe_plan(input, indent + 1);
                 format!("{prefix}PathExpand [{rel_type}*{min_hops}..{max_hops}]\n{child}")
             }
             LogicalPlan::Filter { input, .. } => {
-                let child = self.describe_plan(input, indent + 1);
+                let child = Self::describe_plan(input, indent + 1);
                 format!("{prefix}Filter\n{child}")
             }
             LogicalPlan::Project { input, expressions } => {
                 let cols: Vec<_> = expressions.iter().map(|(name, _)| name.as_str()).collect();
-                let child = self.describe_plan(input, indent + 1);
-                format!("{prefix}Project [{:?}]\n{child}", cols)
+                let child = Self::describe_plan(input, indent + 1);
+                format!("{prefix}Project [{cols:?}]\n{child}")
             }
             LogicalPlan::HashJoin { left, right, left_keys, right_keys, join_type } => {
-                let left_child = self.describe_plan(left, indent + 1);
-                let right_child = self.describe_plan(right, indent + 1);
+                let left_child = Self::describe_plan(left, indent + 1);
+                let right_child = Self::describe_plan(right, indent + 1);
                 format!(
-                    "{prefix}HashJoin [{:?}] on {:?} = {:?}\n{left_child}\n{right_child}",
-                    join_type, left_keys, right_keys
+                    "{prefix}HashJoin [{join_type:?}] on {left_keys:?} = {right_keys:?}\n{left_child}\n{right_child}"
                 )
             }
             LogicalPlan::Aggregate { input, group_by, aggregates } => {
                 let aggs: Vec<_> = aggregates.iter().map(|(name, _)| name.as_str()).collect();
-                let child = self.describe_plan(input, indent + 1);
+                let child = Self::describe_plan(input, indent + 1);
                 format!(
                     "{prefix}Aggregate [group_by: {}, agg: {:?}]\n{child}",
                     group_by.len(), aggs
                 )
             }
             LogicalPlan::Sort { input, order_by } => {
-                let child = self.describe_plan(input, indent + 1);
+                let child = Self::describe_plan(input, indent + 1);
                 format!("{prefix}Sort [{}]\n{child}", order_by.len())
             }
             LogicalPlan::Limit { input, skip, limit } => {
-                let child = self.describe_plan(input, indent + 1);
-                format!("{prefix}Limit [skip={:?}, limit={:?}]\n{child}", skip, limit)
+                let child = Self::describe_plan(input, indent + 1);
+                format!("{prefix}Limit [skip={skip:?}, limit={limit:?}]\n{child}")
             }
             LogicalPlan::Union { inputs, all } => {
                 let children: Vec<_> = inputs.iter()
-                    .map(|p| self.describe_plan(p, indent + 1))
+                    .map(|p| Self::describe_plan(p, indent + 1))
                     .collect();
                 let kind = if *all { "UNION ALL" } else { "UNION" };
                 format!("{prefix}{kind}\n{}", children.join("\n"))
