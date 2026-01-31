@@ -33,7 +33,7 @@ impl std::fmt::Debug for NodeTable {
             .field("schema", &self.schema.name)
             .field("row_count", &self.row_count)
             .field("column_count", &self.columns.len())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

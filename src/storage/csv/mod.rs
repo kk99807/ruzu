@@ -226,6 +226,12 @@ impl CsvImportConfig {
     /// - `batch_size` is 0 or greater than 1,000,000
     /// - `mmap_threshold` is less than 1MB
     pub fn validate(&self) -> Result<(), RuzuError> {
+        const MIN_BLOCK_SIZE: usize = 64 * 1024; // 64KB
+        const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024; // 16MB
+        // Allow larger batch sizes for streaming imports (up to 10M)
+        const MAX_BATCH_SIZE: usize = 10_000_000;
+        const MIN_MMAP_THRESHOLD: u64 = 1024 * 1024; // 1MB
+
         if let Some(threads) = self.num_threads {
             if threads == 0 {
                 return Err(RuzuError::ValidationError(
@@ -233,9 +239,6 @@ impl CsvImportConfig {
                 ));
             }
         }
-
-        const MIN_BLOCK_SIZE: usize = 64 * 1024; // 64KB
-        const MAX_BLOCK_SIZE: usize = 16 * 1024 * 1024; // 16MB
 
         if self.block_size < MIN_BLOCK_SIZE {
             return Err(RuzuError::ValidationError(format!(
@@ -255,15 +258,12 @@ impl CsvImportConfig {
             ));
         }
 
-        // Allow larger batch sizes for streaming imports (up to 10M)
-        const MAX_BATCH_SIZE: usize = 10_000_000;
         if self.batch_size > MAX_BATCH_SIZE {
             return Err(RuzuError::ValidationError(format!(
                 "batch_size must be at most {MAX_BATCH_SIZE}"
             )));
         }
 
-        const MIN_MMAP_THRESHOLD: u64 = 1024 * 1024; // 1MB
         if self.mmap_threshold < MIN_MMAP_THRESHOLD {
             return Err(RuzuError::ValidationError(format!(
                 "mmap_threshold must be at least {MIN_MMAP_THRESHOLD} bytes"

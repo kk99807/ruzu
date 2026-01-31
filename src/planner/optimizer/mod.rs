@@ -70,16 +70,14 @@ pub enum ConstantValue {
 /// Tries to evaluate a `BoundExpression` to a constant boolean value.
 fn try_evaluate_constant(expr: &BoundExpression) -> ConstantValue {
     match expr {
-        BoundExpression::Literal { value, .. } => match value {
-            Value::Bool(b) => {
-                if *b {
-                    ConstantValue::True
-                } else {
-                    ConstantValue::False
-                }
+        BoundExpression::Literal { value: Value::Bool(b), .. } => {
+            if *b {
+                ConstantValue::True
+            } else {
+                ConstantValue::False
             }
-            _ => ConstantValue::Unknown,
-        },
+        }
+        BoundExpression::Literal { .. } => ConstantValue::Unknown,
         BoundExpression::Comparison { left, op, right, .. } => {
             if let (
                 BoundExpression::Literal { value: left_val, .. },
@@ -268,13 +266,13 @@ impl OptimizerRule for PredicateSimplificationRule {
                     }
                     ConstantValue::Unknown => {
                         // Check if predicate changed
-                        if format!("{predicate:?}") != format!("{simplified:?}") {
+                        if format!("{predicate:?}") == format!("{simplified:?}") {
+                            Ok(Transformed::No(LogicalPlan::Filter { input, predicate }))
+                        } else {
                             Ok(Transformed::Yes(LogicalPlan::Filter {
                                 input,
                                 predicate: simplified,
                             }))
-                        } else {
-                            Ok(Transformed::No(LogicalPlan::Filter { input, predicate }))
                         }
                     }
                 }

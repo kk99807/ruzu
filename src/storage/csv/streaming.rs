@@ -117,13 +117,14 @@ impl StreamingConfig {
     /// - `buffer_capacity` is 0
     /// - `streaming_threshold` is 0
     pub fn validate(&self) -> Result<(), RuzuError> {
+        const MAX_BATCH_SIZE: usize = 10_000_000;
+
         if self.batch_size == 0 {
             return Err(RuzuError::ValidationError(
                 "streaming batch_size must be at least 1".to_string(),
             ));
         }
 
-        const MAX_BATCH_SIZE: usize = 10_000_000;
         if self.batch_size > MAX_BATCH_SIZE {
             return Err(RuzuError::ValidationError(format!(
                 "streaming batch_size must be at most {MAX_BATCH_SIZE}"

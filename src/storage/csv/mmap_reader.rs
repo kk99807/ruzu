@@ -145,8 +145,7 @@ impl MmapReader {
     #[must_use]
     pub fn len(&self) -> u64 {
         match self {
-            MmapReader::Mmap { size, .. } => *size,
-            MmapReader::Buffered { size, .. } => *size,
+            MmapReader::Mmap { size, .. } | MmapReader::Buffered { size, .. } => *size,
         }
     }
 

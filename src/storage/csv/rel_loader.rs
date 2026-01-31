@@ -340,7 +340,9 @@ impl RelLoader {
         let (from_idx, to_idx, prop_indices) = self.validate_headers(&headers)?;
 
         // Estimate total rows for progress
-        let avg_row_size = if !data.is_empty() {
+        let avg_row_size = if data.is_empty() {
+            100
+        } else {
             let sample_size = 64 * 1024.min(data.len());
             let newlines = data[..sample_size].iter().filter(|&&b| b == b'\n').count();
             if newlines > 0 {
@@ -348,8 +350,6 @@ impl RelLoader {
             } else {
                 100
             }
-        } else {
-            100
         };
         progress.rows_total = Some((file_size as usize / avg_row_size) as u64);
 

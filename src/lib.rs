@@ -326,9 +326,8 @@ impl Database {
         rel_tables: &mut HashMap<String, RelTable>,
     ) -> Result<()> {
         // Open WAL reader
-        let mut reader = match WalReader::open(wal_path) {
-            Ok(r) => r,
-            Err(_) => return Ok(()), // WAL doesn't exist or is empty, nothing to replay
+        let Ok(mut reader) = WalReader::open(wal_path) else {
+            return Ok(()); // WAL doesn't exist or is empty, nothing to replay
         };
 
         // Analyze WAL to find committed transactions
@@ -607,6 +606,7 @@ impl Database {
     /// Saves all data (catalog and table data) to disk.
     fn save_all_data(&mut self) -> Result<()> {
         use storage::TableData;
+        use storage::RelTableData;
 
         let buffer_pool = self
             .buffer_pool
@@ -679,7 +679,6 @@ impl Database {
             .ok_or_else(|| RuzuError::StorageError("No header in in-memory mode".into()))?;
 
         // T028: Serialize relationship table data using multi-page support
-        use storage::RelTableData;
         let mut rel_data_map: HashMap<String, RelTableData> = HashMap::new();
         for (table_name, rel_table) in &self.rel_tables {
             rel_data_map.insert(table_name.clone(), rel_table.to_data());

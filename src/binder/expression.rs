@@ -131,6 +131,7 @@ impl BoundExpression {
 
     /// Creates a logical NOT expression.
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn not(operand: BoundExpression) -> Self {
         BoundExpression::Logical {
             op: LogicalOp::Not,

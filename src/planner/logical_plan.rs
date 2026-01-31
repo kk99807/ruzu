@@ -205,7 +205,9 @@ impl LogicalPlan {
                 }
                 schema
             }
-            LogicalPlan::Filter { input, .. } => input.output_schema(),
+            LogicalPlan::Filter { input, .. }
+            | LogicalPlan::Sort { input, .. }
+            | LogicalPlan::Limit { input, .. } => input.output_schema(),
             LogicalPlan::Project { expressions, .. } => {
                 expressions.iter()
                     .map(|(name, expr)| (name.clone(), expr.data_type()))
@@ -224,8 +226,6 @@ impl LogicalPlan {
                 schema.extend(aggregates.iter().map(|(name, expr)| (name.clone(), expr.data_type())));
                 schema
             }
-            LogicalPlan::Sort { input, .. } => input.output_schema(),
-            LogicalPlan::Limit { input, .. } => input.output_schema(),
             LogicalPlan::Union { inputs, .. } => {
                 inputs.first().map_or_else(Vec::new, LogicalPlan::output_schema)
             }

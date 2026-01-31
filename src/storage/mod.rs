@@ -311,22 +311,21 @@ impl DatabaseHeader {
     /// Returns an error if deserialization fails.
     pub fn deserialize(data: &[u8]) -> crate::error::Result<Self> {
         // Try to deserialize as current format first
-        match bincode::deserialize::<Self>(data) {
-            Ok(header) => Ok(header),
-            Err(_) => {
-                // If v2 deserialization fails, try v1 format and migrate
-                let v1_header: DatabaseHeaderV1 = bincode::deserialize(data).map_err(|e| {
-                    crate::error::RuzuError::StorageError(format!(
-                        "Failed to deserialize header as v1 or v2: {e}"
-                    ))
-                })?;
+        if let Ok(header) = bincode::deserialize::<Self>(data) {
+            Ok(header)
+        } else {
+            // If v2 deserialization fails, try v1 format and migrate
+            let v1_header: DatabaseHeaderV1 = bincode::deserialize(data).map_err(|e| {
+                crate::error::RuzuError::StorageError(format!(
+                    "Failed to deserialize header as v1 or v2: {e}"
+                ))
+            })?;
 
-                // Migrate v1 to v2
-                let mut v2_header = Self::from_v1(&v1_header);
-                // Recompute checksum after migration
-                v2_header.update_checksum();
-                Ok(v2_header)
-            }
+            // Migrate v1 to v2
+            let mut v2_header = Self::from_v1(&v1_header);
+            // Recompute checksum after migration
+            v2_header.update_checksum();
+            Ok(v2_header)
         }
     }
 

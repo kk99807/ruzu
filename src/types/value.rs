@@ -57,13 +57,10 @@ impl DataType {
     #[must_use]
     pub fn byte_size(&self) -> Option<usize> {
         match self {
-            DataType::Int64 => Some(8),
-            DataType::Float32 => Some(4),
-            DataType::Float64 => Some(8),
+            DataType::Int64 | DataType::Float64 | DataType::Timestamp => Some(8),
+            DataType::Float32 | DataType::Date => Some(4),
             DataType::Bool => Some(1),
-            DataType::Date => Some(4),      // days since epoch as i32
-            DataType::Timestamp => Some(8), // microseconds since epoch as i64
-            DataType::String => None,       // variable width
+            DataType::String => None, // variable width
         }
     }
 
@@ -154,13 +151,12 @@ impl std::hash::Hash for Value {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            Value::Int64(v) => v.hash(state),
+            Value::Int64(v) | Value::Timestamp(v) => v.hash(state),
             Value::Float32(v) => v.to_bits().hash(state),
             Value::Float64(v) => v.to_bits().hash(state),
             Value::Bool(v) => v.hash(state),
             Value::String(v) => v.hash(state),
             Value::Date(v) => v.hash(state),
-            Value::Timestamp(v) => v.hash(state),
             Value::Null => {}
         }
     }
@@ -251,13 +247,13 @@ impl Value {
     #[must_use]
     pub fn compare(&self, other: &Value) -> Option<Ordering> {
         match (self, other) {
-            (Value::Int64(a), Value::Int64(b)) => Some(a.cmp(b)),
+            (Value::Int64(a), Value::Int64(b))
+            | (Value::Timestamp(a), Value::Timestamp(b)) => Some(a.cmp(b)),
             (Value::Float32(a), Value::Float32(b)) => a.partial_cmp(b),
             (Value::Float64(a), Value::Float64(b)) => a.partial_cmp(b),
             (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
             (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
             (Value::Date(a), Value::Date(b)) => Some(a.cmp(b)),
-            (Value::Timestamp(a), Value::Timestamp(b)) => Some(a.cmp(b)),
             // Null or type mismatch
             _ => None,
         }
